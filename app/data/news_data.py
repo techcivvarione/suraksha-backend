@@ -1,10 +1,12 @@
 import feedparser
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
+# In-memory cache
 NEWS_CACHE = []
 LAST_FETCHED = None
 
-
+# RSS sources (Phase 2 – stable only)
 RSS_SOURCES = [
     {
         "source": "The Hacker News",
@@ -19,6 +21,14 @@ RSS_SOURCES = [
         "url": "https://news.google.com/rss/search?q=artificial+intelligence",
     }
 ]
+
+# ---------- helpers ----------
+
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"<.*?>", "", text)   # remove HTML tags
+    return text.strip()
 
 
 def categorize(text: str) -> str:
@@ -43,32 +53,47 @@ def point_to_note(category: str) -> str:
     }
     return mapping.get(category, "Stay cautious online.")
 
+# ---------- core ----------
 
-def fetch_news():
+def fetch_news(force: bool = False):
     global NEWS_CACHE, LAST_FETCHED
+
+    # Cache validity: 30 minutes
+    if NEWS_CACHE and LAST_FETCHED and not force:
+        if datetime.utcnow() - LAST_FETCHED < timedelta(minutes=30):
+            return NEWS_CACHE
 
     news_items = []
 
     for src in RSS_SOURCES:
-        feed = feedparser.parse(src["url"])
+        try:
+            feed = feedparser.parse(src["url"])
 
-        for entry in feed.entries[:10]:
-            title = entry.get("title", "")
-            summary = entry.get("summary", "")
-            text_blob = f"{title} {summary}"
+            for entry in feed.entries[:5]:  # limit per source
+                title = clean_text(entry.get("title", ""))
+                summary = clean_text(entry.get("summary", ""))
+                text_blob = f"{title} {summary}"
 
-            category = categorize(text_blob)
+                category = categorize(text_blob)
 
-            news_items.append({
-                "source": src["source"],
-                "category": category,
-                "title": title,
-                "summary": summary,
-                "image": entry.get("media_thumbnail", [{}])[0].get("url"),
-                "published_at": entry.get("published", ""),
-                "point_to_note": point_to_note(category),
-                "link": entry.get("link")
-            })
+                image = None
+                if "media_thumbnail" in entry:
+                    image = entry.media_thumbnail[0].get("url")
+
+                news_items.append({
+                    "source": src["source"],
+                    "category": category,
+                    "title": title,
+                    "summary": summary,
+                    "image": image,
+                    "published_at": entry.get("published", ""),
+                    "point_to_note": point_to_note(category),
+                    "link": entry.get("link")
+                })
+
+        except Exception:
+            # Never crash because of a bad feed
+            continue
 
     NEWS_CACHE = news_items
     LAST_FETCHED = datetime.utcnow()
