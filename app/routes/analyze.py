@@ -5,46 +5,58 @@ from app.services.analyzer import analyze_url, analyze_text_message
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
 
-def build_user_guidance(risk: str):
+def emergency_actions_india(risk: str):
     if risk == "high":
         return {
-            "summary": "This looks like a high-risk scam.",
-            "do": [
-                "Do NOT click links or reply to the message",
-                "Block the sender immediately",
-                "Contact your bank using official numbers",
-                "Report this on the cybercrime portal (cybercrime.gov.in)"
+            "immediate_actions": [
+                "Do NOT click any links or reply to the message",
+                "If money was sent, call your bank/UPI helpline immediately",
+                "Block the sender and preserve evidence (screenshots, numbers)"
+            ],
+            "reporting": [
+                "Report at https://www.cybercrime.gov.in",
+                "Call 1930 (India cybercrime helpline)"
             ],
             "avoid": [
-                "Sharing OTP, PIN, CVV, or personal details",
-                "Trusting urgency or threats"
+                "Sharing OTP, PIN, CVV, Aadhaar, PAN",
+                "Installing apps or screen-sharing"
             ]
         }
 
     if risk == "medium":
         return {
-            "summary": "This may be a scam. Please be cautious.",
-            "do": [
-                "Verify the message from an official source",
-                "Check the sender carefully",
-                "Avoid clicking unknown links"
+            "immediate_actions": [
+                "Pause and verify from official sources",
+                "Check bank/app notifications directly (not via links)",
+                "Warn family members if message is circulating"
+            ],
+            "reporting": [
+                "If suspicious, report at https://www.cybercrime.gov.in"
             ],
             "avoid": [
-                "Acting in urgency",
-                "Sharing sensitive information"
+                "Acting under urgency or threats",
+                "Sharing personal details"
             ]
         }
 
     return {
-        "summary": "This does not look dangerous, but stay alert.",
-        "do": [
-            "Continue with normal caution",
-            "Verify if unsure"
+        "immediate_actions": [
+            "No urgent action needed",
+            "Stay alert and verify if unsure"
         ],
+        "reporting": [],
         "avoid": [
             "Blindly trusting unknown messages"
         ]
     }
+
+
+def build_summary(risk: str):
+    if risk == "high":
+        return "High-risk scam suspected. Immediate action recommended."
+    if risk == "medium":
+        return "Potential scam. Proceed with caution."
+    return "No strong scam indicators detected. Stay alert."
 
 
 @router.post("/", response_model=AnalyzeResponse)
@@ -76,11 +88,12 @@ def analyze_input(request: AnalyzeRequest):
     else:
         risk = "low"
 
-    guidance = build_user_guidance(risk)
+    summary = build_summary(risk)
+    actions = emergency_actions_india(risk)
 
-    # Combine technical + user-friendly response
+    # Combine output
     return AnalyzeResponse(
         risk=risk,
         score=score,
-        reasons=reasons + [guidance["summary"]]
+        reasons=reasons + [summary] + actions["immediate_actions"] + actions["reporting"]
     )
