@@ -5,7 +5,6 @@ from app.services.analyzer import analyze_url, analyze_text_message
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
-
 URL_REGEX = r"(https?://[^\s]+)"
 
 
@@ -14,22 +13,31 @@ def extract_url(text: str):
     return match.group(0) if match else None
 
 
+def risk_summary(risk: str):
+    if risk == "high":
+        return "High-risk scam detected. Immediate action required."
+    if risk == "medium":
+        return "Potential scam detected. Please proceed with caution."
+    return "No strong scam indicators found."
+
+
 def emergency_actions_india(risk: str):
     if risk == "high":
         return [
-            "Do NOT click links or reply",
+            "Do not click links or reply to the message",
             "Call your bank/UPI helpline immediately if money was sent",
-            "Report at https://www.cybercrime.gov.in or call 1930"
+            "Report at cybercrime.gov.in or call 1930",
+            "Block the sender and save evidence"
         ]
     if risk == "medium":
         return [
             "Verify from official sources",
             "Avoid clicking unknown links",
-            "Report if suspicious"
+            "Do not share OTP or personal details"
         ]
     return [
         "No urgent action needed",
-        "Stay alert"
+        "Stay alert and verify if unsure"
     ]
 
 
@@ -37,26 +45,25 @@ def emergency_actions_india(risk: str):
 def analyze_input(request: AnalyzeRequest):
 
     total_score = 0
-    reasons = []
+    detected_reasons = []
 
     # TEXT analysis
     if request.type == "text":
         text_result = analyze_text_message(request.content)
         total_score += text_result["score"]
-        reasons.extend(text_result["reasons"])
+        detected_reasons.extend(text_result["reasons"])
 
-        # Extract URL from text if present
         extracted_url = extract_url(request.content)
         if extracted_url:
             url_result = analyze_url(extracted_url)
             total_score += url_result["score"]
-            reasons.extend(url_result["reasons"])
+            detected_reasons.extend(url_result["reasons"])
 
     # URL-only analysis
     elif request.type == "url":
         url_result = analyze_url(request.content)
         total_score += url_result["score"]
-        reasons.extend(url_result["reasons"])
+        detected_reasons.extend(url_result["reasons"])
 
     else:
         return AnalyzeResponse(
@@ -73,10 +80,18 @@ def analyze_input(request: AnalyzeRequest):
     else:
         risk = "low"
 
+    summary = risk_summary(risk)
     actions = emergency_actions_india(risk)
 
+    # Clean, UI-friendly response
     return AnalyzeResponse(
         risk=risk,
         score=total_score,
-        reasons=reasons + actions
+        reasons=[
+            summary,
+            "Why this was flagged:",
+            *detected_reasons,
+            "What you should do:",
+            *actions
+        ]
     )
