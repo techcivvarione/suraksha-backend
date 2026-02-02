@@ -2,12 +2,32 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 import whois
 import requests
+import re
 
 NEW_DOMAIN_DAYS_THRESHOLD = 90
 
 SHORTENER_DOMAINS = {
     "bit.ly", "tinyurl.com", "t.co", "goo.gl",
     "is.gd", "buff.ly", "ow.ly", "cutt.ly"
+}
+
+SCAM_KEYWORDS = {
+    "urgency": [
+        "urgent", "immediately", "act now", "within 24 hours",
+        "final warning", "account will be blocked"
+    ],
+    "authority": [
+        "rbi", "income tax", "bank team", "kys", "kyc update",
+        "customs", "police", "legal action"
+    ],
+    "reward": [
+        "refund", "cashback", "won", "prize", "lottery",
+        "gift", "free"
+    ],
+    "threat": [
+        "blocked", "suspended", "terminated",
+        "penalty", "fine", "arrest"
+    ]
 }
 
 
@@ -59,6 +79,24 @@ def analyze_redirects(url: str):
         score += 10
 
     return score, reasons
+
+
+def analyze_text_message(text: str):
+    reasons = []
+    score = 0
+
+    text_lower = text.lower()
+
+    for category, keywords in SCAM_KEYWORDS.items():
+        for word in keywords:
+            if re.search(rf"\b{re.escape(word)}\b", text_lower):
+                reasons.append(f"Scam keyword detected: '{word}'")
+                score += 15
+
+    return {
+        "score": score,
+        "reasons": reasons
+    }
 
 
 def analyze_url(url: str):
