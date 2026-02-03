@@ -4,6 +4,7 @@ from datetime import datetime, date
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.db import get_db
 from app.models.analyze import AnalyzeRequest, AnalyzeResponse
@@ -148,39 +149,16 @@ def analyze_input(
             )
 
         db.execute(
-            """
-            insert into scan_history (
-                id,
-                user_id,
-                input_text,
-                risk,
-                score,
-                reasons,
-                created_at
-            )
-            values (
-                :id,
-                :user_id,
-                :input_text,
-                :risk,
-                :score,
-                :reasons,
-                now()
-            )
-            """,
-            {
-                "id": str(uuid.uuid4()),
-                "user_id": user_id,
-                "input_text": request_data.content,
-                "risk": risk,
-                "score": total_score,
-                "reasons": {
-                    "risk": risk,
-                    "score": total_score,
-                    "reasons": reasons,
-                },
-            },
-        )
+    text("""
+        insert into scan_history (user_id, input, result)
+        values (:user_id, :input, :result)
+    """),
+    {
+        "user_id": user.id,
+        "input": content,
+        "result": risk,
+    }
+)
         db.commit()
 
     return AnalyzeResponse(
