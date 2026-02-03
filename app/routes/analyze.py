@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
 import re
-from datetime import datetime, date
-import uuid
+import json  # 🔥 REQUIRED FOR JSONB
+from datetime import date
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -16,15 +16,14 @@ router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
 URL_REGEX = r"(https?://[^\s]+)"
 
-# ---------------- soft limits ----------------
+# ---------------- limits ----------------
 DAILY_ANALYZE_LIMIT = 20
 USAGE_COUNTER = {}   # user_id -> { "date": date, "count": int }
-
-# ---------------- rate limiting ----------------
 ANALYZE_RATE = {}    # user_id -> count
 MAX_ANALYZE = 20
 
 
+# ---------------- rate limiting ----------------
 def analyze_rate_limit(user_id: str):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
@@ -91,7 +90,7 @@ def analyze_input(
         analyze_rate_limit(str(current_user.id))
 
     total_score = 0
-    detected_reasons = []
+    detected_reasons: list[str] = []
 
     # ---- TEXT analysis ----
     if request_data.type == "text":
@@ -149,16 +148,30 @@ def analyze_input(
             )
 
         db.execute(
-    text("""
-        insert into scan_history (user_id, input, result)
-        values (:user_id, :input, :result)
-    """),
-    {
-        "user_id": user.id,
-        "input": content,
-        "result": risk,
-    }
-)
+            text("""
+                INSERT INTO scan_history (
+                    user_id,
+                    input_text,
+                    risk,
+                    score,
+                    reasons
+                )
+                VALUES (
+                    :user_id,
+                    :input_text,
+                    :risk,
+                    :score,
+                    :reasons
+                )
+            """),
+            {
+                "user_id": current_user.id,
+                "input_text": request_data.content,
+                "risk": risk,
+                "score": total_score,
+                "reasons": json.dumps(reasons),  # 🔥 THIS IS THE FIX
+            }
+        )
         db.commit()
 
     return AnalyzeResponse(

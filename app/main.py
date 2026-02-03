@@ -10,6 +10,8 @@ from app.routes.alerts import router as alerts_router
 from app.routes.ai import router as ai_router
 from app.routes.risk import router as risk_router
 from app.routes.security import router as security_router
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(
     title="GO Suraksha API",
