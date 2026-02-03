@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 from app.db import get_db
@@ -48,10 +48,11 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(subject: str):
+    now = datetime.now(tz=timezone.utc)
     payload = {
         "sub": subject,
-        "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        "iat": int(now.timestamp()),  # ✅ store as UNIX timestamp
+        "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -63,18 +64,30 @@ def get_current_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
         user_id = payload.get("sub")
         iat = payload.get("iat")
+
+        if not user_id or not iat:
+            raise HTTPException(status_code=401, detail="Invalid token")
 
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        if user.updated_at and iat:
-            if datetime.fromtimestamp(iat) < user.updated_at:
+        # ✅ FIX: compare UTC-aware datetimes
+        if user.updated_at:
+            token_issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
+
+            user_updated_at = user.updated_at
+            if user_updated_at.tzinfo is None:
+                user_updated_at = user_updated_at.replace(tzinfo=timezone.utc)
+
+            if token_issued_at < user_updated_at:
                 raise HTTPException(status_code=401, detail="Session expired")
 
         return user
+
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
