@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from app.routes.analyze import router as analyze_router
 from app.routes.news import router as news_router
@@ -10,28 +11,33 @@ from app.routes.alerts import router as alerts_router
 from app.routes.ai import router as ai_router
 from app.routes.risk import router as risk_router
 from app.routes.security import router as security_router
-from dotenv import load_dotenv
+from app.routes.home import router as home_router   # ✅ NEW
+
 load_dotenv()
 
 app = FastAPI(
     title="GO Suraksha API",
     description="Rule-based digital safety, scam detection, alerts, and account security",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 @app.get("/")
 def root():
     return {"status": "GO Suraksha backend is running"}
 
-app.include_router(analyze_router)
-app.include_router(news_router)
+# ---------------- ROUTES ----------------
 app.include_router(auth_router)
 app.include_router(profile_router)
+app.include_router(home_router)       # ✅ NEW (/home/overview)
+app.include_router(analyze_router)
 app.include_router(history_router)
-app.include_router(ai_router)       # rule-based insights
 app.include_router(alerts_router)
+app.include_router(news_router)
+app.include_router(ai_router)
 app.include_router(risk_router)
 app.include_router(security_router)
+
+# ---------------- MIDDLEWARE ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
