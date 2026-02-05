@@ -263,17 +263,18 @@ def _translate_with_cache(news_items, lang: str):
 
 
 def _translate_text(text: str, lang: str) -> str:
-    if not text.strip():
+    if not text or not text.strip():
         return text
+
     try:
-        res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": f"Translate into {lang} for Indian users. Keep cybersecurity terms accurate."},
-                {"role": "user", "content": text},
-            ],
-            temperature=0.2,
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=f"Translate the following text to {lang}. Keep it natural and simple:\n\n{text}"
         )
-        return res.choices[0].message.content.strip()
-    except Exception:
+
+        return response.output_text.strip()
+
+    except Exception as e:
+        print("TRANSLATION ERROR:", e)
         return text
+
