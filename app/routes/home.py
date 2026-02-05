@@ -65,7 +65,7 @@ FINANCIAL_IMPACT_2026 = {
 }
 
 GLOBAL_THREAT_PULSE_CACHE = {
-    "last_24h_incidents_estimated": 180000,
+    "last_24h_incidents_estimated": 2900,
     "threat_level": "Medium",
     "updated_at": datetime.now(tz=timezone.utc),
     "source": "Aggregated public threat feeds",
