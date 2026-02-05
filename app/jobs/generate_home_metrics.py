@@ -2,12 +2,6 @@
 Background job to generate Home intelligence:
 - Global / India / State-level Threat Pulse
 - Global / India Financial Impact
-
-SAFE DESIGN:
-- No FastAPI imports
-- No startup hooks
-- One failure ≠ total failure
-- Inserts only validated JSON
 """
 
 import os
@@ -45,6 +39,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 if not OPENAI_API_KEY:
     raise RuntimeError("OpenAI API key missing")
 
+# ✅ SINGLE, CORRECT SUPABASE CLIENT (SERVICE ROLE)
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -54,11 +49,11 @@ openai = OpenAI(api_key=OPENAI_API_KEY)
 # ------------------------
 
 INDIAN_STATES = [
-    "IN-TG",  # Telangana
-    "IN-KA",  # Karnataka
-    "IN-MH",  # Maharashtra
-    "IN-TN",  # Tamil Nadu
-    "IN-DL",  # Delhi
+    "IN-TG",
+    "IN-KA",
+    "IN-MH",
+    "IN-TN",
+    "IN-DL",
 ]
 
 THREAT_VALIDITY = {
@@ -93,8 +88,7 @@ def call_ai(prompt: str) -> Optional[Dict[str, Any]]:
             temperature=0.2,
         )
 
-        content = resp.choices[0].message.content
-        return json.loads(content)
+        return json.loads(resp.choices[0].message.content)
 
     except Exception as e:
         logging.error(f"AI call failed: {e}")
@@ -181,7 +175,6 @@ def generate_financial_impact(scope: str) -> Optional[Dict[str, Any]]:
             "Verizon DBIR",
         ]
         context = "global"
-
     else:
         sources = [
             "RBI",
@@ -227,11 +220,10 @@ JSON format:
 
 
 # ------------------------
-# DB INSERT
+# DB INSERT (UNCHANGED BEHAVIOR)
 # ------------------------
 
 def insert_metric(row: Dict[str, Any]):
-    supabase = get_supabase()   # ✅ REQUIRED
     try:
         supabase.table("home_metrics").insert({
             "scope": row["scope"],
@@ -259,7 +251,6 @@ def insert_metric(row: Dict[str, Any]):
 def main():
     logging.info("🚀 Home metrics generation started")
 
-    # --- Threat Pulse ---
     for scope, region in [
         ("global", None),
         ("india", "IN"),
@@ -273,7 +264,6 @@ def main():
         if row:
             insert_metric(row)
 
-    # --- Financial Impact ---
     for scope in ["global", "india"]:
         row = generate_financial_impact(scope)
         if row:
