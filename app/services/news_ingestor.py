@@ -1,7 +1,7 @@
 import os
 import time
 import feedparser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,22 +20,24 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # CACHE (translations)
 # ------------------------------------------------------------------
 _TRANSLATION_CACHE = {}
-_CACHE_TTL = 60 * 60  # 1 hour
+_CACHE_TTL = 60 * 60  # 1 hour (soft TTL safety)
 
 
-def _cache_key(lang: str):
-    return f"news::{lang}"
+def _cache_key(lang: str) -> str:
+    today = date.today().isoformat()
+    return f"news::{lang}::{today}"
 
 
-def _is_cache_valid(entry):
-    return entry and (time.time() - entry["ts"] < _CACHE_TTL)
+def _is_cache_valid(entry: dict | None) -> bool:
+    if not entry:
+        return False
+    return (time.time() - entry["ts"]) < _CACHE_TTL
 
 
 # ------------------------------------------------------------------
 # FEED PRIORITY & CAPS
 # ------------------------------------------------------------------
 
-# Tier-1 = highest trust / importance
 TIER_1_FEEDS = {
     "The Hacker News",
     "BleepingComputer",
@@ -45,7 +47,6 @@ TIER_1_FEEDS = {
     "Google Online Security",
 }
 
-# Tier-2 = strong signal
 TIER_2_FEEDS = {
     "Dark Reading",
     "SecurityWeek",
@@ -56,7 +57,6 @@ TIER_2_FEEDS = {
     "WeLiveSecurity",
 }
 
-# Tier-3 = awareness / AI / builders
 TIER_3_FEEDS = {
     "OpenAI Blog",
     "Google DeepMind",
@@ -74,7 +74,6 @@ TIER_3_FEEDS = {
     "PIB India Tech",
 }
 
-# Per-source caps
 SOURCE_CAPS = {
     "DEFAULT": 2,
     "The Hacker News": 5,
@@ -87,7 +86,6 @@ SOURCE_CAPS = {
 # RSS SOURCES
 # ------------------------------------------------------------------
 RSS_SOURCES = {
-    # Security
     "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
     "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
     "Krebs on Security": "https://krebsonsecurity.com/feed/",
@@ -101,7 +99,6 @@ RSS_SOURCES = {
     "Google Online Security": "http://feeds.feedburner.com/GoogleOnlineSecurityBlog",
     "CISA Advisories": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
 
-    # AI / Builders / India
     "OpenAI Blog": "https://openai.com/blog/rss/",
     "Google DeepMind": "https://deepmind.google/blog/rss.xml",
     "Microsoft AI Blog": "https://www.microsoft.com/en-us/ai/blog/feed/",
@@ -156,7 +153,7 @@ ACTIONS = {
 }
 
 # ------------------------------------------------------------------
-# INGEST (PRIORITY + CAPS)
+# INGEST
 # ------------------------------------------------------------------
 def ingest_news():
     ordered_sources = (
@@ -166,9 +163,7 @@ def ingest_news():
     )
 
     for source in ordered_sources:
-        url = RSS_SOURCES[source]
-        feed = feedparser.parse(url)
-
+        feed = feedparser.parse(RSS_SOURCES[source])
         cap = SOURCE_CAPS.get(source, SOURCE_CAPS["DEFAULT"])
         count = 0
 
@@ -180,11 +175,7 @@ def ingest_news():
             if not link:
                 continue
 
-            exists = supabase.table("raw_news") \
-                .select("id") \
-                .eq("link", link) \
-                .execute()
-
+            exists = supabase.table("raw_news").select("id").eq("link", link).execute()
             if exists.data:
                 continue
 
@@ -214,7 +205,7 @@ def ingest_news():
             count += 1
 
 # ------------------------------------------------------------------
-# READ API (FEATURED / TRENDING)
+# READ API
 # ------------------------------------------------------------------
 def get_news_with_language(lang: str = "en"):
     base_news = _fetch_news()
@@ -224,31 +215,14 @@ def get_news_with_language(lang: str = "en"):
 
 
 def _fetch_news():
-    resp = supabase.table("news") \
-        .select("*") \
-        .order("published_at", desc=True) \
-        .limit(60) \
-        .execute()
-
+    resp = supabase.table("news").select("*").order("published_at", desc=True).limit(60).execute()
     now = datetime.utcnow()
-    items = []
 
+    items = []
     for n in resp.data or []:
         published = (
             datetime.fromisoformat(n["published_at"])
             if n.get("published_at") else None
-        )
-
-        is_trending = (
-            published and
-            now - published < timedelta(hours=24) and
-            n["impact"] in ["HIGH", "MEDIUM"]
-        )
-
-        is_featured = (
-            n["impact"] == "HIGH" or
-            n["category"] == "Government Alert" or
-            n["source"] in TIER_1_FEEDS
         )
 
         items.append({
@@ -258,16 +232,18 @@ def _fetch_news():
             "summary": n["matter"],
             "published_at": n["published_at"],
             "point_to_note": n["actions"][0] if n.get("actions") else "",
-            "is_trending": is_trending,
-            "is_featured": is_featured,
+            "is_trending": published and now - published < timedelta(hours=24),
+            "is_featured": n["impact"] == "HIGH" or n["category"] == "Government Alert",
             "link": ""
         })
 
     return items
 
 
-def _translate_with_cache(news_items, lang):
-    cache = _TRANSLATION_CACHE.get(_cache_key(lang))
+def _translate_with_cache(news_items, lang: str):
+    key = _cache_key(lang)
+    cache = _TRANSLATION_CACHE.get(key)
+
     if _is_cache_valid(cache):
         return cache["data"]
 
@@ -279,7 +255,7 @@ def _translate_with_cache(news_items, lang):
         t["point_to_note"] = _translate_text(item["point_to_note"], lang)
         translated.append(t)
 
-    _TRANSLATION_CACHE[_cache_key(lang)] = {
+    _TRANSLATION_CACHE[key] = {
         "data": translated,
         "ts": time.time()
     }
@@ -293,7 +269,7 @@ def _translate_text(text: str, lang: str) -> str:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"Translate to {lang}. Keep it simple."},
+                {"role": "system", "content": f"Translate into {lang} for Indian users. Keep cybersecurity terms accurate."},
                 {"role": "user", "content": text},
             ],
             temperature=0.2,
