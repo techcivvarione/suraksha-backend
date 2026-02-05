@@ -1,10 +1,9 @@
 """
 Batch job: Generate ~400 character security-focused summaries (English only)
 
-- NO FastAPI imports
 - SAFE to run via cron
-- CHEAP (batch AI calls)
-- Idempotent (can rerun safely)
+- Idempotent
+- Handles NULL + empty summaries
 """
 
 import os
@@ -28,7 +27,6 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 BATCH_SIZE = 5
 
-# ✅ CREATE SUPABASE CLIENT ONCE
 supabase = get_supabase()
 
 # ------------------------
@@ -36,11 +34,14 @@ supabase = get_supabase()
 # ------------------------
 
 def fetch_without_summary() -> List[Dict]:
+    """
+    Fetch rows where summary_400 is NULL OR empty string
+    """
     res = (
         supabase
         .table("news")
         .select("id, headline, matter")
-        .is_("summary_400", None)
+        .or_("summary_400.is.null,summary_400.eq.")
         .limit(BATCH_SIZE)
         .execute()
     )
@@ -49,11 +50,12 @@ def fetch_without_summary() -> List[Dict]:
 
 def update_summary(rows: List[Dict]):
     for row in rows:
-        if not row.get("id") or not row.get("summary_400"):
+        summary = row.get("summary_400", "").strip()
+        if not row.get("id") or not summary:
             continue
 
         supabase.table("news") \
-            .update({"summary_400": row["summary_400"]}) \
+            .update({"summary_400": summary}) \
             .eq("id", row["id"]) \
             .execute()
 
@@ -66,31 +68,35 @@ def summarize_batch(items: List[Dict]) -> List[Dict]:
     if not items:
         return []
 
-    payload = [
-        {
+    payload = []
+
+    for i in items:
+        text = (i.get("matter") or i.get("headline") or "").strip()
+        if not text:
+            continue
+
+        payload.append({
             "id": i["id"],
-            "headline": i["headline"],
-            "matter": i["matter"],
-        }
-        for i in items
-    ]
+            "text": text
+        })
+
+    if not payload:
+        return []
 
     prompt = f"""
 You are a cybersecurity analyst.
 
 Task:
-Summarize each news item into a concise, security-focused summary.
+Summarize each item into a concise security-focused summary.
 
 Rules:
 - Focus on risk, impact, and why it matters
 - Neutral professional tone
-- Maximum ~400 characters
-- No HTML
-- No links
-- No emojis
+- Max ~400 characters
+- No HTML, no links, no emojis
 - Output STRICT JSON ARRAY ONLY
 
-Expected JSON format:
+Format:
 [
   {{
     "id": "string",
@@ -114,17 +120,16 @@ Input:
 
         raw = resp.choices[0].message.content.strip()
 
-        # 🔒 Robust JSON extraction
         start = raw.find("[")
         end = raw.rfind("]") + 1
 
         if start == -1 or end == -1:
-            raise ValueError("No valid JSON array found")
+            raise ValueError("No JSON array found")
 
         parsed = json.loads(raw[start:end])
 
         if not isinstance(parsed, list):
-            raise ValueError("Parsed output is not a list")
+            raise ValueError("Output is not a list")
 
         return parsed
 
