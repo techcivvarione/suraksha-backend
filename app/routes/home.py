@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.db import get_db
 from app.routes.auth import get_current_user
 from app.models.user import User
-from app.data.news_data import NEWS_CACHE, fetch_news
+
 
 router = APIRouter(prefix="/home", tags=["Home"])
 
@@ -25,51 +25,28 @@ class SecuritySnapshot(BaseModel):
     overall_risk: str
 
 
-class GlobalThreatPulse(BaseModel):
-    last_24h_incidents_estimated: int
-    threat_level: str
-    updated_at: datetime
-    source: str
-
-
-class HotNewsItem(BaseModel):
-    title: str
-    category: str
-    source: str
-    published_at: datetime
+class ThreatPulse(BaseModel):
+    scope: str
+    region_code: Optional[str]
+    payload: Dict[str, Any]
+    confidence: str
+    sources: List[str]
+    generated_at: datetime
 
 
 class FinancialImpact(BaseModel):
-    year: int
-    estimated_global_loss_usd: int
-    display_text: str
-    source: str
+    scope: str
+    region_code: Optional[str]
+    payload: Dict[str, Any]
+    confidence: str
+    sources: List[str]
+    generated_at: datetime
 
 
 class HomeOverviewResponse(BaseModel):
     security_snapshot: SecuritySnapshot
-    global_threat_pulse: GlobalThreatPulse
-    hot_news: List[HotNewsItem]
-    financial_impact: FinancialImpact
-
-
-# ---------------------------
-# Static / Cached Data
-# ---------------------------
-
-FINANCIAL_IMPACT_2026 = {
-    "year": 2026,
-    "estimated_global_loss_usd": 10500000000000,  # $10.5T
-    "display_text": "Estimated global cybercrime losses in 2026",
-    "source": "IBM / Verizon / Industry reports",
-}
-
-GLOBAL_THREAT_PULSE_CACHE = {
-    "last_24h_incidents_estimated": 2900,
-    "threat_level": "Medium",
-    "updated_at": datetime.now(tz=timezone.utc),
-    "source": "Aggregated public threat feeds",
-}
+    threat_pulse: Dict[str, ThreatPulse]
+    financial_impact: Dict[str, FinancialImpact]
 
 
 # ---------------------------
@@ -84,6 +61,33 @@ def compute_overall_risk(high: int, medium: int) -> str:
     return "Low"
 
 
+def fetch_metric(
+    db: Session,
+    metric_type: str,
+    scope: str,
+    region_code: Optional[str],
+):
+    row = db.execute(
+        text("""
+            SELECT scope, region_code, payload, sources, confidence, generated_at
+            FROM home_metrics
+            WHERE metric_type = :metric_type
+              AND scope = :scope
+              AND (:region_code IS NULL OR region_code = :region_code)
+              AND valid_until > now()
+            ORDER BY generated_at DESC
+            LIMIT 1
+        """),
+        {
+            "metric_type": metric_type,
+            "scope": scope,
+            "region_code": region_code,
+        },
+    ).mappings().first()
+
+    return row
+
+
 # ---------------------------
 # Route
 # ---------------------------
@@ -95,7 +99,10 @@ def home_overview(
 ):
     user_id = str(current_user.id)
 
-    # ---- Scan stats ----
+    # ---------------------------
+    # Scan + Alert Snapshot
+    # ---------------------------
+
     scan_stats = db.execute(
         text("""
             SELECT
@@ -114,7 +121,6 @@ def home_overview(
     medium_scans = scan_stats["medium_count"] or 0
     last_scan_at = scan_stats["last_scan_at"]
 
-    # ---- Unread HIGH alerts ----
     high_alerts = db.execute(
         text("""
             SELECT COUNT(*)
@@ -136,30 +142,67 @@ def home_overview(
         overall_risk=overall_risk,
     )
 
-    # ---- Global threat pulse (cached) ----
-    global_threat_pulse = GlobalThreatPulse(**GLOBAL_THREAT_PULSE_CACHE)
+    # ---------------------------
+    # Region Resolution (Profile → Device → IP)
+    # For now: profile-based
+    # ---------------------------
 
-    # ---- Hot news (top 2) ----
-    if not NEWS_CACHE:
-        fetch_news()
+    user_country = getattr(current_user, "country_code", None)
+    user_region = getattr(current_user, "region_code", None)
 
-    hot_news = []
-    for item in NEWS_CACHE[:2]:
-        hot_news.append(
-            HotNewsItem(
-                title=item.get("title"),
-                category=item.get("category"),
-                source=item.get("source", "News"),
-                published_at=item.get("published_at", datetime.now(tz=timezone.utc)),
-            )
-        )
+    # ---------------------------
+    # Threat Pulse
+    # ---------------------------
 
-    # ---- Financial impact ----
-    financial_impact = FinancialImpact(**FINANCIAL_IMPACT_2026)
+    threat_pulse: Dict[str, ThreatPulse] = {}
+
+    global_tp = fetch_metric(db, "threat_pulse", "global", None)
+    if global_tp:
+        threat_pulse["global"] = ThreatPulse(**global_tp)
+
+    if user_country == "IN":
+        india_tp = fetch_metric(db, "threat_pulse", "india", "IN")
+        if india_tp:
+            threat_pulse["india"] = ThreatPulse(**india_tp)
+
+        if user_region:
+            region_tp = fetch_metric(db, "threat_pulse", "region", user_region)
+            if region_tp:
+                threat_pulse["region"] = ThreatPulse(**region_tp)
+            else:
+                threat_pulse["region"] = ThreatPulse(
+                    scope="region",
+                    region_code=user_region,
+                    payload={
+                        "status": "no_recent_data",
+                        "message": "No recent regional advisories. Showing India-wide risk.",
+                    },
+                    confidence="low",
+                    sources=[],
+                    generated_at=datetime.now(tz=timezone.utc),
+                )
+
+    # ---------------------------
+    # Financial Impact
+    # ---------------------------
+
+    financial_impact: Dict[str, FinancialImpact] = {}
+
+    global_fi = fetch_metric(db, "financial_impact", "global", None)
+    if global_fi:
+        financial_impact["global"] = FinancialImpact(**global_fi)
+
+    if user_country == "IN":
+        india_fi = fetch_metric(db, "financial_impact", "india", "IN")
+        if india_fi:
+            financial_impact["india"] = FinancialImpact(**india_fi)
+
+    # ---------------------------
+    # Final Response
+    # ---------------------------
 
     return HomeOverviewResponse(
         security_snapshot=security_snapshot,
-        global_threat_pulse=global_threat_pulse,
-        hot_news=hot_news,
+        threat_pulse=threat_pulse,
         financial_impact=financial_impact,
     )

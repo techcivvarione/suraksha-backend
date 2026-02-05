@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.user import User
 from app.routes.auth import get_current_user
-from app.data.news_data import NEWS_CACHE, fetch_news
+
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
@@ -22,9 +22,9 @@ class SubscribeRequest(BaseModel):
 def severity_for(category: str, alert_type: str) -> str:
     if alert_type == "history":
         return "HIGH"
-    if category.lower() in ["cyber crime", "cyber"]:
+    if category.lower() in ["cyber", "cyber crime", "ai", "govt"]:
         return "HIGH"
-    if category.lower() in ["banking", "upi"]:
+    if category.lower() in ["banking", "upi", "finance"]:
         return "MEDIUM"
     return "LOW"
 
@@ -99,45 +99,52 @@ def refresh_alerts(
     if not subs:
         return {"status": "no_subscriptions", "new_alerts_created": 0}
 
-    # ---- NEWS → ALERTS ----
-    if not NEWS_CACHE:
-        fetch_news()
+    # ---- NEWS → ALERTS (DB BASED, NOT RSS) ----
+    news_rows = db.execute(
+        """
+        select id, headline, matter, category, source
+        from news
+        where category = any(:cats)
+        order by published_at desc
+        limit 50
+        """,
+        {"cats": subs},
+    ).mappings().all()
 
-    for news in NEWS_CACHE:
-        if news["category"] in subs:
-            exists = db.execute(
+    for news in news_rows:
+        exists = db.execute(
+            """
+            select 1 from alerts
+            where user_id = :uid and source = :src
+            """,
+            {"uid": str(current_user.id), "src": news["source"]},
+        ).first()
+
+        if not exists:
+            db.execute(
                 """
-                select 1 from alerts
-                where user_id = :uid and source = :src
-                """,
-                {"uid": str(current_user.id), "src": news["link"]},
-            ).first()
-
-            if not exists:
-                db.execute(
-                    """
-                    insert into alerts (
-                        id, user_id, type, title, message,
-                        category, severity, source, read, created_at
-                    )
-                    values (
-                        :id, :uid, 'news', :title, :msg,
-                        :cat, :sev, :src, false, now()
-                    )
-                    """,
-                    {
-                        "id": str(uuid.uuid4()),
-                        "uid": str(current_user.id),
-                        "title": news["title"],
-                        "msg": news["summary"],
-                        "cat": news["category"],
-                        "sev": severity_for(news["category"], "news"),
-                        "src": news["link"],
-                    },
+                insert into alerts (
+                    id, user_id, type, title, message,
+                    category, severity, source, read, created_at
                 )
-                created += 1
+                values (
+                    :id, :uid, 'news', :title, :msg,
+                    :cat, :sev, :src, false, now()
+                )
+                """,
+                {
+                    "id": str(uuid.uuid4()),
+                    "uid": str(current_user.id),
+                    "title": news["headline"],
+                    "msg": news["matter"],
+                    "cat": news["category"],
+                    "sev": severity_for(news["category"], "news"),
+                    "src": news["source"],
+                },
+            )
+            created += 1
 
-    # ---- HISTORY → ALERTS (DB based) ----
+    # ---- HISTORY → ALERTS (UNCHANGED LOGIC) ----
     rows = db.execute(
         """
         select input_text

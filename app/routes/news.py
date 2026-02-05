@@ -1,42 +1,59 @@
 from fastapi import APIRouter, Query
-from app.data.news_data import fetch_news
+from app.services.supabase_client import supabase
 
-router = APIRouter(
-    prefix="/news",
-    tags=["News"]
-)
+router = APIRouter(prefix="/news", tags=["News"])
+
+
+def pick(local: str | None, fallback: str | None) -> str:
+    """
+    Safe language fallback:
+    - avoids None
+    - avoids empty strings
+    """
+    if local and local.strip():
+        return local
+    return fallback or ""
 
 
 @router.get("/")
-def get_news(
-    category: str | None = Query(default=None, description="Filter by category"),
-    source: str | None = Query(default=None, description="Filter by source"),
-    search: str | None = Query(default=None, description="Search in title and summary"),
-):
-    # Always fetch via cache-aware function
-    news_items = fetch_news()
+def get_news(lang: str = Query("en")):
+    resp = (
+        supabase
+        .table("news")
+        .select("*")
+        .order("published_at", desc=True)
+        .limit(30)
+        .execute()
+    )
 
-    results = news_items
+    data = resp.data or []
+    results = []
 
-    if category:
-        results = [
-            n for n in results
-            if n.get("category", "").lower() == category.lower()
-        ]
+    for n in data:
+        # -------- TITLE --------
+        if lang == "te":
+            title = pick(n.get("headline_te"), n.get("headline"))
+        elif lang == "hi":
+            title = pick(n.get("headline_hi"), n.get("headline"))
+        else:
+            title = n.get("headline") or ""
 
-    if source:
-        results = [
-            n for n in results
-            if source.lower() in n.get("source", "").lower()
-        ]
+        # -------- SUMMARY (FIXED) --------
+        if lang == "te":
+            summary = pick(n.get("summary_400_te"), n.get("summary_400"))
+        elif lang == "hi":
+            summary = pick(n.get("summary_400_hi"), n.get("summary_400"))
+        else:
+            summary = n.get("summary_400") or ""
 
-    if search:
-        search_l = search.lower()
-        results = [
-            n for n in results
-            if search_l in n.get("title", "").lower()
-            or search_l in n.get("summary", "").lower()
-        ]
+        results.append({
+            "source": n.get("source"),
+            "category": n.get("category"),
+            "title": title,
+            "summary": summary,
+            "published_at": n.get("published_at"),
+            "is_trending": True,  # placeholder
+        })
 
     return {
         "count": len(results),
