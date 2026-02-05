@@ -1,18 +1,36 @@
+# app/services/supabase_client.py
+
 import os
 from supabase import create_client, Client
-from dotenv import load_dotenv
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(BASE_DIR / ".env")
+_supabase: Client | None = None
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-    raise RuntimeError("Supabase env vars missing")
+def get_supabase() -> Client:
+    """
+    Lazy Supabase client initializer.
+    Safe for:
+    - FastAPI startup
+    - Railway deployments
+    - Cron jobs
+    """
 
-supabase: Client = create_client(
-    SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY
-)
+    global _supabase
+
+    if _supabase is not None:
+        return _supabase
+
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+
+    if not url or not key:
+        raise RuntimeError(
+            "Supabase configuration missing.\n"
+            "Required env vars:\n"
+            "- SUPABASE_URL\n"
+            "- SUPABASE_KEY\n"
+            "Check Railway → Service → Variables."
+        )
+
+    _supabase = create_client(url, key)
+    return _supabase

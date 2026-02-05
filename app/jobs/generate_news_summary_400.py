@@ -11,10 +11,11 @@ import os
 import json
 from pathlib import Path
 from typing import List, Dict
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app.services.supabase_client import supabase
+from app.services.supabase_client import get_supabase
 
 # ------------------------
 # ENV
@@ -25,8 +26,10 @@ load_dotenv(BASE_DIR / ".env")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-BATCH_SIZE = 5  # keep small for safety & cost
+BATCH_SIZE = 5
 
+# ✅ CREATE SUPABASE CLIENT ONCE
+supabase = get_supabase()
 
 # ------------------------
 # DB HELPERS
@@ -34,7 +37,8 @@ BATCH_SIZE = 5  # keep small for safety & cost
 
 def fetch_without_summary() -> List[Dict]:
     res = (
-        supabase.table("news")
+        supabase
+        .table("news")
         .select("id, headline, matter")
         .is_("summary_400", None)
         .limit(BATCH_SIZE)
@@ -45,6 +49,9 @@ def fetch_without_summary() -> List[Dict]:
 
 def update_summary(rows: List[Dict]):
     for row in rows:
+        if not row.get("id") or not row.get("summary_400"):
+            continue
+
         supabase.table("news") \
             .update({"summary_400": row["summary_400"]}) \
             .eq("id", row["id"]) \
@@ -95,24 +102,35 @@ Input:
 {json.dumps(payload, ensure_ascii=False)}
 """
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You write concise cybersecurity risk summaries."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You write concise cybersecurity risk summaries."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
 
-    raw = resp.choices[0].message.content.strip()
+        raw = resp.choices[0].message.content.strip()
 
-    # ---- robust JSON extraction ----
-    start = raw.find("[")
-    end = raw.rfind("]") + 1
-    if start == -1 or end == -1:
-        raise ValueError("Invalid JSON from model")
+        # 🔒 Robust JSON extraction
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
 
-    return json.loads(raw[start:end])
+        if start == -1 or end == -1:
+            raise ValueError("No valid JSON array found")
+
+        parsed = json.loads(raw[start:end])
+
+        if not isinstance(parsed, list):
+            raise ValueError("Parsed output is not a list")
+
+        return parsed
+
+    except Exception as e:
+        print(f"❌ Summary generation failed: {e}")
+        return []
 
 
 # ------------------------

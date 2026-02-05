@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from app.services.supabase_client import supabase
+from app.services.supabase_client import get_supabase
 
 router = APIRouter(prefix="/news", tags=["News"])
 
@@ -17,6 +17,9 @@ def pick(local: str | None, fallback: str | None) -> str:
 
 @router.get("/")
 def get_news(lang: str = Query("en")):
+    # ✅ CREATE CLIENT SAFELY
+    supabase = get_supabase()
+
     resp = (
         supabase
         .table("news")
@@ -38,7 +41,7 @@ def get_news(lang: str = Query("en")):
         else:
             title = n.get("headline") or ""
 
-        # -------- SUMMARY (FIXED) --------
+        # -------- SUMMARY --------
         if lang == "te":
             summary = pick(n.get("summary_400_te"), n.get("summary_400"))
         elif lang == "hi":

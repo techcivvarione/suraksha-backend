@@ -231,6 +231,7 @@ JSON format:
 # ------------------------
 
 def insert_metric(row: Dict[str, Any]):
+    supabase = get_supabase()   # ✅ REQUIRED
     try:
         supabase.table("home_metrics").insert({
             "scope": row["scope"],

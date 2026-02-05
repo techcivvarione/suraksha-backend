@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from typing import List
 
-from app.services.supabase_client import supabase
+from app.services.supabase_client import get_supabase
 from app.services.news_translator import translate_batch
 
 # ------------------------
@@ -21,16 +21,20 @@ load_dotenv(BASE_DIR / ".env")
 
 BATCH_SIZE = 10
 
+# ✅ CREATE SUPABASE CLIENT ONCE (SAFE FOR CRON)
+supabase = get_supabase()
 
 # ------------------------
 # DB HELPERS
 # ------------------------
 
 def fetch_untranslated(lang_code: str) -> List[dict]:
+    supabase = get_supabase()
     column = "headline_te" if lang_code == "te" else "headline_hi"
 
     res = (
-        supabase.table("news")
+        supabase
+        .table("news")
         .select("id, headline, matter")
         .or_(f"{column}.is.null,{column}.eq.")
         .limit(BATCH_SIZE)
@@ -38,7 +42,6 @@ def fetch_untranslated(lang_code: str) -> List[dict]:
     )
 
     return res.data or []
-
 
 
 def update_translations(lang_code: str, translated_rows: List[dict]):
@@ -63,7 +66,8 @@ def update_translations(lang_code: str, translated_rows: List[dict]):
             }
 
         resp = (
-            supabase.table("news")
+            supabase
+            .table("news")
             .update(updates)
             .eq("id", news_id)
             .execute()
@@ -84,13 +88,12 @@ def run():
 
     for lang in ["te", "hi"]:
         rows = fetch_untranslated(lang)
+
         if not rows:
             print(f"ℹ️ No untranslated rows for {lang}")
             continue
 
         translated = translate_batch(rows, lang)
-
-        print(f"DEBUG: translated output ({lang}) =", translated)
 
         if translated:
             update_translations(lang, translated)
