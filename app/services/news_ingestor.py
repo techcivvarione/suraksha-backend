@@ -1,7 +1,8 @@
 import os
 import time
+import hashlib
 import feedparser
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,24 +21,20 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # CACHE (translations)
 # ------------------------------------------------------------------
 _TRANSLATION_CACHE = {}
-_CACHE_TTL = 60 * 60  # 1 hour (soft TTL safety)
+_CACHE_TTL = 60 * 60  # 1 hour
 
 
-def _cache_key(lang: str) -> str:
-    today = date.today().isoformat()
-    return f"news::{lang}::{today}"
+def _cache_key(lang: str, fingerprint: str) -> str:
+    return f"news::{lang}::{fingerprint}"
 
 
 def _is_cache_valid(entry: dict | None) -> bool:
-    if not entry:
-        return False
-    return (time.time() - entry["ts"]) < _CACHE_TTL
+    return bool(entry and (time.time() - entry["ts"] < _CACHE_TTL))
 
 
 # ------------------------------------------------------------------
-# FEED PRIORITY & CAPS
+# FEED PRIORITY & CAPS (UNCHANGED)
 # ------------------------------------------------------------------
-
 TIER_1_FEEDS = {
     "The Hacker News",
     "BleepingComputer",
@@ -83,7 +80,7 @@ SOURCE_CAPS = {
 }
 
 # ------------------------------------------------------------------
-# RSS SOURCES
+# RSS SOURCES (UNCHANGED)
 # ------------------------------------------------------------------
 RSS_SOURCES = {
     "The Hacker News": "https://feeds.feedburner.com/TheHackersNews",
@@ -117,7 +114,7 @@ RSS_SOURCES = {
 }
 
 # ------------------------------------------------------------------
-# CLASSIFICATION
+# CLASSIFICATION (UNCHANGED)
 # ------------------------------------------------------------------
 def categorize(text: str) -> str:
     t = text.lower()
@@ -129,7 +126,7 @@ def categorize(text: str) -> str:
         return "Data Breach"
     if any(k in t for k in ["cert", "cisa", "alert", "advisory"]):
         return "Government Alert"
-    if "ai" in t or "artificial intelligence" in t:
+    if "ai" in t:
         return "AI"
     return "Awareness"
 
@@ -153,58 +150,6 @@ ACTIONS = {
 }
 
 # ------------------------------------------------------------------
-# INGEST
-# ------------------------------------------------------------------
-def ingest_news():
-    ordered_sources = (
-        [s for s in RSS_SOURCES if s in TIER_1_FEEDS] +
-        [s for s in RSS_SOURCES if s in TIER_2_FEEDS] +
-        [s for s in RSS_SOURCES if s in TIER_3_FEEDS]
-    )
-
-    for source in ordered_sources:
-        feed = feedparser.parse(RSS_SOURCES[source])
-        cap = SOURCE_CAPS.get(source, SOURCE_CAPS["DEFAULT"])
-        count = 0
-
-        for entry in feed.entries:
-            if count >= cap:
-                break
-
-            link = entry.get("link")
-            if not link:
-                continue
-
-            exists = supabase.table("raw_news").select("id").eq("link", link).execute()
-            if exists.data:
-                continue
-
-            title = entry.get("title", "").strip()
-            summary = entry.get("summary", "").strip()
-            published = entry.get("published_parsed")
-
-            published_at = (
-                datetime(*published[:6]).isoformat()
-                if published else None
-            )
-
-            text = f"{title} {summary}"
-            category = categorize(text)
-            impact = impact_level(text)
-
-            supabase.table("news").insert({
-                "headline": title,
-                "matter": summary[:500],
-                "category": category,
-                "impact": impact,
-                "actions": ACTIONS.get(category, ACTIONS["Awareness"]),
-                "source": source,
-                "published_at": published_at
-            }).execute()
-
-            count += 1
-
-# ------------------------------------------------------------------
 # READ API
 # ------------------------------------------------------------------
 def get_news_with_language(lang: str = "en"):
@@ -215,10 +160,15 @@ def get_news_with_language(lang: str = "en"):
 
 
 def _fetch_news():
-    resp = supabase.table("news").select("*").order("published_at", desc=True).limit(60).execute()
-    now = datetime.utcnow()
+    resp = supabase.table("news") \
+        .select("*") \
+        .order("published_at", desc=True) \
+        .limit(60) \
+        .execute()
 
+    now = datetime.utcnow()
     items = []
+
     for n in resp.data or []:
         published = (
             datetime.fromisoformat(n["published_at"])
@@ -232,7 +182,7 @@ def _fetch_news():
             "summary": n["matter"],
             "published_at": n["published_at"],
             "point_to_note": n["actions"][0] if n.get("actions") else "",
-            "is_trending": published and now - published < timedelta(hours=24),
+            "is_trending": bool(published and now - published < timedelta(hours=24)),
             "is_featured": n["impact"] == "HIGH" or n["category"] == "Government Alert",
             "link": ""
         })
@@ -240,10 +190,18 @@ def _fetch_news():
     return items
 
 
+# ------------------------------------------------------------------
+# TRANSLATION (FIXED)
+# ------------------------------------------------------------------
 def _translate_with_cache(news_items, lang: str):
-    key = _cache_key(lang)
-    cache = _TRANSLATION_CACHE.get(key)
+    raw = "".join(
+        (item["title"] + item["summary"])
+        for item in news_items[:10]
+    )
+    fingerprint = hashlib.md5(raw.encode()).hexdigest()
+    key = _cache_key(lang, fingerprint)
 
+    cache = _TRANSLATION_CACHE.get(key)
     if _is_cache_valid(cache):
         return cache["data"]
 
@@ -259,22 +217,26 @@ def _translate_with_cache(news_items, lang: str):
         "data": translated,
         "ts": time.time()
     }
+
+    print(f"[AI] Translated news to {lang}")
     return translated
 
 
 def _translate_text(text: str, lang: str) -> str:
-    if not text or not text.strip():
+    if not text.strip():
         return text
 
     try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=f"Translate the following text to {lang}. Keep it natural and simple:\n\n{text}"
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"Translate to {lang}. Keep it natural."},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2,
         )
-
-        return response.output_text.strip()
+        return res.choices[0].message.content.strip()
 
     except Exception as e:
         print("TRANSLATION ERROR:", e)
         return text
-
