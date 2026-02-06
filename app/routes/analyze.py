@@ -1,25 +1,24 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
 import json
+import logging
 from datetime import date
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db import get_db
 from app.models.analyze import AnalyzeRequest, AnalyzeResponse
-from app.services.analyzer import analyze_input_full
 from app.routes.auth import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
-# ---------------- limits ----------------
+# ---------------- LIMITS ----------------
 DAILY_ANALYZE_LIMIT = 20
 USAGE_COUNTER = {}
 ANALYZE_RATE = {}
 MAX_ANALYZE = 20
 
-
-# ---------------- rate limiting ----------------
+# ---------------- RATE LIMIT ----------------
 def analyze_rate_limit(user_id: str):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
@@ -38,8 +37,7 @@ def update_usage(user_id: str) -> int:
 
     return USAGE_COUNTER[user_id]["count"]
 
-
-# ---------------- route ----------------
+# ---------------- ROUTE ----------------
 @router.post("/", response_model=AnalyzeResponse)
 def analyze_input(
     request_data: AnalyzeRequest,
@@ -47,21 +45,37 @@ def analyze_input(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
-    # ---- RATE LIMIT ----
-    if current_user:
-        analyze_rate_limit(str(current_user.id))
+    # ✅ IMPORT INSIDE FUNCTION (RAILWAY SAFE)
+    from app.services.analyzer import analyze_input_full
 
-    # ---- CORE ANALYSIS ----
-    result = analyze_input_full(request_data.content)
+    try:
+        # ---- RATE LIMIT ----
+        if current_user:
+            analyze_rate_limit(str(current_user.id))
 
-    # ---- CLEAN STRUCTURED DATA (FOR DB) ----
+        # ---- CORE ANALYSIS (PROTECTED) ----
+        result = analyze_input_full(request_data.content)
+
+    except HTTPException:
+        # pass through known HTTP errors
+        raise
+
+    except Exception as e:
+        # 🔥 THIS IS THE KEY FIX — NO RAW 500
+        logging.exception("Analyze failed")
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to analyze input safely. Please try again."
+        )
+
+    # ---- STRUCTURED DATA FOR DB ----
     clean_reasons = {
         "summary": result["summary"],
         "flags": result["reasons"],
         "actions": [result["recommended_action"]],
     }
 
-    # ---- FLAT REASONS (FOR API RESPONSE / UI) ----
+    # ---- FLAT DATA FOR UI ----
     response_reasons = [
         result["summary"],
         "Why this was flagged:",
@@ -70,10 +84,9 @@ def analyze_input(
         result["recommended_action"],
     ]
 
-    # ---- SAVE HISTORY (AUTH USERS ONLY) ----
+    # ---- SAVE HISTORY ----
     if current_user:
-        user_id = str(current_user.id)
-        count = update_usage(user_id)
+        count = update_usage(str(current_user.id))
 
         if count > DAILY_ANALYZE_LIMIT:
             response_reasons.insert(
@@ -81,34 +94,37 @@ def analyze_input(
                 f"Usage notice: You have used {count} analyses today."
             )
 
-        db.execute(
-            text("""
-                INSERT INTO scan_history (
-                    user_id,
-                    input_text,
-                    risk,
-                    score,
-                    reasons
-                )
-                VALUES (
-                    :user_id,
-                    :input_text,
-                    :risk,
-                    :score,
-                    :reasons
-                )
-            """),
-            {
-                "user_id": current_user.id,
-                "input_text": request_data.content,
-                "risk": result["risk_level"].lower(),
-                "score": result["confidence"],
-                "reasons": json.dumps(clean_reasons),
-            }
-        )
-        db.commit()
+        try:
+            db.execute(
+                text("""
+                    INSERT INTO scan_history (
+                        user_id,
+                        input_text,
+                        risk,
+                        score,
+                        reasons
+                    )
+                    VALUES (
+                        :user_id,
+                        :input_text,
+                        :risk,
+                        :score,
+                        :reasons
+                    )
+                """),
+                {
+                    "user_id": current_user.id,
+                    "input_text": request_data.content,
+                    "risk": result["risk_level"].lower(),
+                    "score": result["confidence"],
+                    "reasons": json.dumps(clean_reasons),
+                }
+            )
+            db.commit()
+        except Exception:
+            # history failure should NOT kill scan
+            logging.exception("Failed to save scan history")
 
-    # ---- RESPONSE ----
     return AnalyzeResponse(
         risk=result["risk_level"].lower(),
         score=result["confidence"],
