@@ -1,68 +1,28 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
-import re
-import json  # 🔥 REQUIRED FOR JSONB
+import json
 from datetime import date
-
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db import get_db
 from app.models.analyze import AnalyzeRequest, AnalyzeResponse
-from app.services.analyzer import analyze_url, analyze_text_message
+from app.services.analyzer import analyze_input_full
 from app.routes.auth import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
-URL_REGEX = r"(https?://[^\s]+)"
-
-# ---------------- limits ----------------
 DAILY_ANALYZE_LIMIT = 20
-USAGE_COUNTER = {}   # user_id -> { "date": date, "count": int }
-ANALYZE_RATE = {}    # user_id -> count
+USAGE_COUNTER = {}
+ANALYZE_RATE = {}
 MAX_ANALYZE = 20
 
 
-# ---------------- rate limiting ----------------
 def analyze_rate_limit(user_id: str):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
         raise HTTPException(status_code=429, detail="Analyze limit reached")
     ANALYZE_RATE[user_id] = count + 1
-
-
-# ---------- helpers ----------
-def extract_url(text: str):
-    match = re.search(URL_REGEX, text)
-    return match.group(0) if match else None
-
-
-def risk_summary(risk: str):
-    if risk == "high":
-        return "High-risk scam detected. Immediate action required."
-    if risk == "medium":
-        return "Potential scam detected. Please proceed with caution."
-    return "No strong scam indicators found."
-
-
-def emergency_actions_india(risk: str):
-    if risk == "high":
-        return [
-            "Do not click links or reply to the message",
-            "Call your bank/UPI helpline immediately if money was sent",
-            "Report at cybercrime.gov.in or call 1930",
-            "Block the sender and save evidence",
-        ]
-    if risk == "medium":
-        return [
-            "Verify from official sources",
-            "Avoid clicking unknown links",
-            "Do not share OTP or personal details",
-        ]
-    return [
-        "No urgent action needed",
-        "Stay alert and verify if unsure",
-    ]
 
 
 def update_usage(user_id: str) -> int:
@@ -77,7 +37,6 @@ def update_usage(user_id: str) -> int:
     return USAGE_COUNTER[user_id]["count"]
 
 
-# ---------- route ----------
 @router.post("/", response_model=AnalyzeResponse)
 def analyze_input(
     request_data: AnalyzeRequest,
@@ -85,67 +44,25 @@ def analyze_input(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
-    # ---------------- RATE LIMIT (AUTH USERS ONLY) ----------------
     if current_user:
         analyze_rate_limit(str(current_user.id))
 
-    total_score = 0
-    detected_reasons: list[str] = []
-
-    # ---- TEXT analysis ----
-    if request_data.type == "text":
-        text_result = analyze_text_message(request_data.content)
-        total_score += text_result["score"]
-        detected_reasons.extend(text_result["reasons"])
-
-        extracted_url = extract_url(request_data.content)
-        if extracted_url:
-            url_result = analyze_url(extracted_url)
-            total_score += url_result["score"]
-            detected_reasons.extend(url_result["reasons"])
-
-    # ---- URL-only analysis ----
-    elif request_data.type == "url":
-        url_result = analyze_url(request_data.content)
-        total_score += url_result["score"]
-        detected_reasons.extend(url_result["reasons"])
-
-    else:
-        return AnalyzeResponse(
-            risk="low",
-            score=0,
-            reasons=["Unsupported input type"],
-        )
-
-    # ---- Risk mapping ----
-    if total_score >= 70:
-        risk = "high"
-    elif total_score >= 30:
-        risk = "medium"
-    else:
-        risk = "low"
-
-    summary = risk_summary(risk)
-    actions = emergency_actions_india(risk)
+    result = analyze_input_full(request_data.content)
 
     reasons = [
-        summary,
+        result["summary"],
         "Why this was flagged:",
-        *detected_reasons,
-        "What you should do:",
-        *actions,
+        *result["reasons"],
+        "Recommended action:",
+        result["recommended_action"],
     ]
 
-    # ---------------- DB SAVE (AUTH USERS ONLY) ----------------
     if current_user:
         user_id = str(current_user.id)
-
         count = update_usage(user_id)
+
         if count > DAILY_ANALYZE_LIMIT:
-            reasons.insert(
-                0,
-                f"Usage notice: You have used {count} analyses today.",
-            )
+            reasons.insert(0, f"Usage notice: You have used {count} analyses today.")
 
         db.execute(
             text("""
@@ -167,15 +84,15 @@ def analyze_input(
             {
                 "user_id": current_user.id,
                 "input_text": request_data.content,
-                "risk": risk,
-                "score": total_score,
-                "reasons": json.dumps(reasons),  # 🔥 THIS IS THE FIX
+                "risk": result["risk_level"].lower(),
+                "score": result["confidence"],
+                "reasons": json.dumps(reasons),
             }
         )
         db.commit()
 
     return AnalyzeResponse(
-        risk=risk,
-        score=total_score,
+        risk=result["risk_level"].lower(),
+        score=result["confidence"],
         reasons=reasons,
     )
