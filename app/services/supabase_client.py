@@ -3,34 +3,33 @@
 import os
 from supabase import create_client, Client
 
-_supabase: Client | None = None
+# Global client (kept for backward compatibility)
+supabase: Client | None = None
 
 
 def get_supabase() -> Client:
     """
     Lazy Supabase client initializer.
-    Safe for:
-    - FastAPI startup
-    - Railway deployments
-    - Cron jobs
+    Compatible with:
+    - Existing code using `from supabase_client import supabase`
+    - New code using `get_supabase()`
     """
 
-    global _supabase
+    global supabase
 
-    if _supabase is not None:
-        return _supabase
+    if supabase is not None:
+        return supabase
 
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
 
     if not url or not key:
         raise RuntimeError(
             "Supabase configuration missing.\n"
             "Required env vars:\n"
             "- SUPABASE_URL\n"
-            "- SUPABASE_KEY\n"
-            "Check Railway → Service → Variables."
+            "- SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY"
         )
 
-    _supabase = create_client(url, key)
-    return _supabase
+    supabase = create_client(url, key)
+    return supabase
