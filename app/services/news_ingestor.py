@@ -3,6 +3,8 @@ import feedparser
 import hashlib
 from datetime import datetime
 
+from app.services.supabase_client import get_supabase
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
@@ -11,15 +13,20 @@ logging.basicConfig(
 def ingest_rss():
     logging.info("🚀 RSS ingestion started")
 
+    # ✅ FIX 1: define supabase at FUNCTION LEVEL
+    supabase = None
+
     try:
-        from app.services.supabase_client import supabase
+        supabase = get_supabase()
     except Exception as e:
         logging.error(f"Supabase init failed: {e}")
         return
 
-    # 🔐 CURATED RSS SOURCES (CYBER / AI / TECH / INDIAN GOVT)
+    if supabase is None:
+        logging.error("Supabase client is None")
+        return
+
     RSS_SOURCES = {
-        # 🌍 Global Cybersecurity
         "The Hacker News": ("https://feeds.feedburner.com/TheHackersNews", "Cyber"),
         "SecurityWeek": ("https://www.securityweek.com/rss", "Cyber"),
         "Help Net Security": ("https://www.helpnetsecurity.com/feed/", "Cyber"),
@@ -28,17 +35,13 @@ def ingest_rss():
         "Sophos News": ("https://news.sophos.com/en-us/feed/", "Cyber"),
         "Google Online Security": ("http://feeds.feedburner.com/GoogleOnlineSecurityBlog", "Cyber"),
 
-        # 🤖 AI + Tech
         "MIT Technology Review": ("https://www.technologyreview.com/feed/", "AI"),
         "OpenAI Blog": ("https://openai.com/blog/rss/", "AI"),
         "The Register Security": ("https://www.theregister.com/security/headlines.atom", "Tech"),
 
-        # 🇮🇳 Government / Cyber
         "CERT-In Advisories": ("https://www.cert-in.org.in/rss/all.xml", "Govt"),
         "CISA Advisories": ("https://www.cisa.gov/cybersecurity-advisories/all.xml", "Govt"),
         "MeitY Press Releases": ("https://www.meity.gov.in/press-releases/rss.xml", "Govt"),
-
-        # 🆔 Aadhaar / Digital India / RBI / NPCI
         "UIDAI Updates": ("https://uidai.gov.in/rss.xml", "Govt"),
         "RBI Press Releases": ("https://rbi.org.in/Scripts/Rss.aspx", "Govt"),
         "PIB Digital India": ("https://pib.gov.in/rss.aspx?ministry_id=31", "Govt"),
@@ -71,7 +74,8 @@ def ingest_rss():
                 ).hexdigest()
 
                 exists = (
-                    supabase.table("news")
+                    supabase
+                    .table("news")
                     .select("id")
                     .eq("fingerprint", fingerprint)
                     .execute()
@@ -80,7 +84,6 @@ def ingest_rss():
                 if exists.data:
                     continue
 
-                # ✅ REQUIRED NOT-NULL FIELDS
                 impact = "HIGH" if category in ["Cyber", "Govt"] else "MEDIUM"
                 actions = "Stay alert. Follow official advisories. Do not click unknown links."
 
