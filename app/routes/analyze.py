@@ -12,12 +12,14 @@ from app.models.user import User
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
+# ---------------- limits ----------------
 DAILY_ANALYZE_LIMIT = 20
 USAGE_COUNTER = {}
 ANALYZE_RATE = {}
 MAX_ANALYZE = 20
 
 
+# ---------------- rate limiting ----------------
 def analyze_rate_limit(user_id: str):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
@@ -37,6 +39,7 @@ def update_usage(user_id: str) -> int:
     return USAGE_COUNTER[user_id]["count"]
 
 
+# ---------------- route ----------------
 @router.post("/", response_model=AnalyzeResponse)
 def analyze_input(
     request_data: AnalyzeRequest,
@@ -44,25 +47,39 @@ def analyze_input(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
+    # ---- RATE LIMIT ----
     if current_user:
         analyze_rate_limit(str(current_user.id))
 
+    # ---- CORE ANALYSIS ----
     result = analyze_input_full(request_data.content)
 
-    reasons = [
+    # ---- CLEAN STRUCTURED DATA (FOR DB) ----
+    clean_reasons = {
+        "summary": result["summary"],
+        "flags": result["reasons"],
+        "actions": [result["recommended_action"]],
+    }
+
+    # ---- FLAT REASONS (FOR API RESPONSE / UI) ----
+    response_reasons = [
         result["summary"],
         "Why this was flagged:",
         *result["reasons"],
-        "Recommended action:",
+        "What you should do:",
         result["recommended_action"],
     ]
 
+    # ---- SAVE HISTORY (AUTH USERS ONLY) ----
     if current_user:
         user_id = str(current_user.id)
         count = update_usage(user_id)
 
         if count > DAILY_ANALYZE_LIMIT:
-            reasons.insert(0, f"Usage notice: You have used {count} analyses today.")
+            response_reasons.insert(
+                0,
+                f"Usage notice: You have used {count} analyses today."
+            )
 
         db.execute(
             text("""
@@ -86,13 +103,14 @@ def analyze_input(
                 "input_text": request_data.content,
                 "risk": result["risk_level"].lower(),
                 "score": result["confidence"],
-                "reasons": json.dumps(reasons),
+                "reasons": json.dumps(clean_reasons),
             }
         )
         db.commit()
 
+    # ---- RESPONSE ----
     return AnalyzeResponse(
         risk=result["risk_level"].lower(),
         score=result["confidence"],
-        reasons=reasons,
+        reasons=response_reasons,
     )
