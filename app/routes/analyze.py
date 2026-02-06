@@ -45,23 +45,24 @@ def analyze_input(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
-    # ✅ IMPORT INSIDE FUNCTION (RAILWAY SAFE)
+    # ✅ Railway-safe import
     from app.services.analyzer import analyze_input_full
 
-    try:
-        # ---- RATE LIMIT ----
-        if current_user:
-            analyze_rate_limit(str(current_user.id))
+    # 🚨 HARD REQUIRE AUTH (THIS FIXES HISTORY FOREVER)
+    if not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required to analyze"
+        )
 
-        # ---- CORE ANALYSIS (PROTECTED) ----
+    try:
+        analyze_rate_limit(str(current_user.id))
         result = analyze_input_full(request_data.content)
 
     except HTTPException:
-        # pass through known HTTP errors
         raise
 
-    except Exception as e:
-        # 🔥 THIS IS THE KEY FIX — NO RAW 500
+    except Exception:
         logging.exception("Analyze failed")
         raise HTTPException(
             status_code=400,
@@ -84,46 +85,45 @@ def analyze_input(
         result["recommended_action"],
     ]
 
-    # ---- SAVE HISTORY ----
-    if current_user:
-        count = update_usage(str(current_user.id))
+    # ---- SAVE HISTORY (NO SILENT FAIL) ----
+    count = update_usage(str(current_user.id))
 
-        if count > DAILY_ANALYZE_LIMIT:
-            response_reasons.insert(
-                0,
-                f"Usage notice: You have used {count} analyses today."
-            )
+    if count > DAILY_ANALYZE_LIMIT:
+        response_reasons.insert(
+            0,
+            f"Usage notice: You have used {count} analyses today."
+        )
 
-        try:
-            db.execute(
-                text("""
-                    INSERT INTO scan_history (
-                        user_id,
-                        input_text,
-                        risk,
-                        score,
-                        reasons
-                    )
-                    VALUES (
-                        :user_id,
-                        :input_text,
-                        :risk,
-                        :score,
-                        :reasons
-                    )
-                """),
-                {
-                    "user_id": current_user.id,
-                    "input_text": request_data.content,
-                    "risk": result["risk_level"].lower(),
-                    "score": result["confidence"],
-                    "reasons": json.dumps(clean_reasons),
-                }
-            )
-            db.commit()
-        except Exception:
-            # history failure should NOT kill scan
-            logging.exception("Failed to save scan history")
+    try:
+        db.execute(
+            text("""
+                INSERT INTO scan_history (
+                    user_id,
+                    input_text,
+                    risk,
+                    score,
+                    reasons
+                )
+                VALUES (
+                    :user_id,
+                    :input_text,
+                    :risk,
+                    :score,
+                    :reasons
+                )
+            """),
+            {
+                "user_id": str(current_user.id),
+                "input_text": request_data.content,
+                "risk": result["risk_level"].lower(),
+                "score": result["confidence"],
+                "reasons": json.dumps(clean_reasons),
+            }
+        )
+        db.commit()
+
+    except Exception:
+        logging.exception("CRITICAL: Failed to save scan history")
 
     return AnalyzeResponse(
         risk=result["risk_level"].lower(),
