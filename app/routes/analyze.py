@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Depends, HTTPException
 import json
 import logging
+import uuid
 from datetime import date
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -43,40 +44,28 @@ def analyze_input(
     request_data: AnalyzeRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),  # 🔒 AUTH REQUIRED
+    current_user: User = Depends(get_current_user),
 ):
-    # ✅ Railway-safe import
     from app.services.analyzer import analyze_input_full
 
-    # 🚨 HARD BLOCK IF NO AUTH
     if not current_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required to analyze"
-        )
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
         analyze_rate_limit(current_user.id)
         result = analyze_input_full(request_data.content)
-
     except HTTPException:
         raise
-
     except Exception:
         logging.exception("Analyze failed")
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to analyze input safely. Please try again."
-        )
+        raise HTTPException(status_code=400, detail="Analyze failed")
 
-    # ---- STRUCTURED DATA FOR DB ----
     clean_reasons = {
         "summary": result["summary"],
         "flags": result["reasons"],
         "actions": [result["recommended_action"]],
     }
 
-    # ---- FLAT DATA FOR UI ----
     response_reasons = [
         result["summary"],
         "Why this was flagged:",
@@ -85,7 +74,6 @@ def analyze_input(
         result["recommended_action"],
     ]
 
-    # ---- USAGE TRACKING ----
     count = update_usage(current_user.id)
 
     if count > DAILY_ANALYZE_LIMIT:
@@ -94,27 +82,32 @@ def analyze_input(
             f"Usage notice: You have used {count} analyses today."
         )
 
-    # ---- SAVE HISTORY (CRITICAL FIX APPLIED) ----
+    # 🔥 FINAL FIX: INSERT ALL REQUIRED COLUMNS
     try:
         db.execute(
             text("""
                 INSERT INTO scan_history (
+                    id,
                     user_id,
                     input_text,
                     risk,
                     score,
-                    reasons
+                    reasons,
+                    created_at
                 )
                 VALUES (
+                    :id,
                     :user_id,
                     :input_text,
                     :risk,
                     :score,
-                    :reasons
+                    :reasons,
+                    now()
                 )
             """),
             {
-                "user_id": current_user.id,   # ✅ FIX: NO str()
+                "id": str(uuid.uuid4()),
+                "user_id": current_user.id,
                 "input_text": request_data.content,
                 "risk": result["risk_level"].lower(),
                 "score": result["confidence"],
@@ -123,12 +116,10 @@ def analyze_input(
         )
         db.commit()
 
-        logging.info(
-            f"Scan history saved for user_id={current_user.id}"
-        )
+        logging.info(f"✅ Scan history saved for user {current_user.id}")
 
     except Exception:
-        logging.exception("CRITICAL: Failed to save scan history")
+        logging.exception("❌ Failed to save scan history")
 
     return AnalyzeResponse(
         risk=result["risk_level"].lower(),
