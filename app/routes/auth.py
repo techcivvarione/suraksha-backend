@@ -6,13 +6,14 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 
+import os
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-SECRET_KEY = "CHANGE_THIS_IN_ENV"
+SECRET_KEY = "207870f96b3161bb3ed2395d7cb3956910976fc6bf4deb2b4a4ac4a3db63a7d3"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
