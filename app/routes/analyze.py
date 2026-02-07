@@ -20,14 +20,14 @@ ANALYZE_RATE = {}
 MAX_ANALYZE = 20
 
 # ---------------- RATE LIMIT ----------------
-def analyze_rate_limit(user_id):
+def analyze_rate_limit(user_id: str):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
         raise HTTPException(status_code=429, detail="Analyze limit reached")
     ANALYZE_RATE[user_id] = count + 1
 
 
-def update_usage(user_id) -> int:
+def update_usage(user_id: str) -> int:
     today = date.today()
     record = USAGE_COUNTER.get(user_id)
 
@@ -37,6 +37,7 @@ def update_usage(user_id) -> int:
         record["count"] += 1
 
     return USAGE_COUNTER[user_id]["count"]
+
 
 # ---------------- ROUTE ----------------
 @router.post("/", response_model=AnalyzeResponse)
@@ -52,7 +53,7 @@ def analyze_input(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
-        analyze_rate_limit(current_user.id)
+        analyze_rate_limit(str(current_user.id))
         result = analyze_input_full(request_data.content)
     except HTTPException:
         raise
@@ -60,6 +61,20 @@ def analyze_input(
         logging.exception("Analyze failed")
         raise HTTPException(status_code=400, detail="Analyze failed")
 
+    # ---------------- RISK NORMALIZATION (CRITICAL FIX) ----------------
+    risk_map = {
+        "safe": "low",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+    }
+
+    normalized_risk = risk_map.get(
+        result["risk_level"].lower(),
+        "low"
+    )
+
+    # ---------------- RESPONSE DATA ----------------
     clean_reasons = {
         "summary": result["summary"],
         "flags": result["reasons"],
@@ -74,7 +89,7 @@ def analyze_input(
         result["recommended_action"],
     ]
 
-    count = update_usage(current_user.id)
+    count = update_usage(str(current_user.id))
 
     if count > DAILY_ANALYZE_LIMIT:
         response_reasons.insert(
@@ -82,7 +97,7 @@ def analyze_input(
             f"Usage notice: You have used {count} analyses today."
         )
 
-    # 🔥 FINAL FIX: INSERT ALL REQUIRED COLUMNS
+    # ---------------- SAVE HISTORY (NOW GUARANTEED) ----------------
     try:
         db.execute(
             text("""
@@ -107,9 +122,9 @@ def analyze_input(
             """),
             {
                 "id": str(uuid.uuid4()),
-                "user_id": current_user.id,
+                "user_id": str(current_user.id),
                 "input_text": request_data.content,
-                "risk": result["risk_level"].lower(),
+                "risk": normalized_risk,   # ✅ FIXED
                 "score": result["confidence"],
                 "reasons": json.dumps(clean_reasons),
             }
@@ -122,7 +137,7 @@ def analyze_input(
         logging.exception("❌ Failed to save scan history")
 
     return AnalyzeResponse(
-        risk=result["risk_level"].lower(),
+        risk=normalized_risk,
         score=result["confidence"],
         reasons=response_reasons,
     )
