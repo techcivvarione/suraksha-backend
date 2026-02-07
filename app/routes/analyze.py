@@ -19,14 +19,14 @@ ANALYZE_RATE = {}
 MAX_ANALYZE = 20
 
 # ---------------- RATE LIMIT ----------------
-def analyze_rate_limit(user_id: str):
+def analyze_rate_limit(user_id):
     count = ANALYZE_RATE.get(user_id, 0)
     if count >= MAX_ANALYZE:
         raise HTTPException(status_code=429, detail="Analyze limit reached")
     ANALYZE_RATE[user_id] = count + 1
 
 
-def update_usage(user_id: str) -> int:
+def update_usage(user_id) -> int:
     today = date.today()
     record = USAGE_COUNTER.get(user_id)
 
@@ -43,12 +43,12 @@ def analyze_input(
     request_data: AnalyzeRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),  # 🔒 AUTH REQUIRED
 ):
     # ✅ Railway-safe import
     from app.services.analyzer import analyze_input_full
 
-    # 🚨 HARD REQUIRE AUTH (THIS FIXES HISTORY FOREVER)
+    # 🚨 HARD BLOCK IF NO AUTH
     if not current_user:
         raise HTTPException(
             status_code=401,
@@ -56,7 +56,7 @@ def analyze_input(
         )
 
     try:
-        analyze_rate_limit(str(current_user.id))
+        analyze_rate_limit(current_user.id)
         result = analyze_input_full(request_data.content)
 
     except HTTPException:
@@ -85,8 +85,8 @@ def analyze_input(
         result["recommended_action"],
     ]
 
-    # ---- SAVE HISTORY (NO SILENT FAIL) ----
-    count = update_usage(str(current_user.id))
+    # ---- USAGE TRACKING ----
+    count = update_usage(current_user.id)
 
     if count > DAILY_ANALYZE_LIMIT:
         response_reasons.insert(
@@ -94,6 +94,7 @@ def analyze_input(
             f"Usage notice: You have used {count} analyses today."
         )
 
+    # ---- SAVE HISTORY (CRITICAL FIX APPLIED) ----
     try:
         db.execute(
             text("""
@@ -113,7 +114,7 @@ def analyze_input(
                 )
             """),
             {
-                "user_id": str(current_user.id),
+                "user_id": current_user.id,   # ✅ FIX: NO str()
                 "input_text": request_data.content,
                 "risk": result["risk_level"].lower(),
                 "score": result["confidence"],
@@ -121,6 +122,10 @@ def analyze_input(
             }
         )
         db.commit()
+
+        logging.info(
+            f"Scan history saved for user_id={current_user.id}"
+        )
 
     except Exception:
         logging.exception("CRITICAL: Failed to save scan history")
