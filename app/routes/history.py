@@ -13,12 +13,7 @@ from app.routes.auth import get_current_user
 router = APIRouter(prefix="/history", tags=["History"])
 
 
-# ---------- MODELS (KEPT FOR COMPATIBILITY) ----------
-class HistorySaveRequest(BaseModel):
-    input_text: str
-    result: dict
-
-
+# ---------- MODELS ----------
 class HistoryItem(BaseModel):
     id: str
     input_text: str
@@ -26,60 +21,6 @@ class HistoryItem(BaseModel):
     score: int
     reasons: dict
     created_at: datetime
-
-
-# =====================================================
-# ⚠️ DEPRECATED: DO NOT USE FROM ANDROID
-# History is saved via /analyze only
-# =====================================================
-@router.post("/save", deprecated=True)
-def save_history(
-    payload: HistorySaveRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    ⚠️ Deprecated.
-    History MUST be saved via /analyze.
-    This exists only for backward compatibility.
-    """
-
-    record_id = str(uuid.uuid4())
-
-    db.execute(
-        text("""
-            INSERT INTO scan_history (
-                id,
-                user_id,
-                input_text,
-                risk,
-                score,
-                reasons,
-                created_at
-            )
-            VALUES (
-                :id,
-                :user_id,
-                :input_text,
-                :risk,
-                :score,
-                :reasons,
-                now()
-            )
-        """),
-        {
-            "id": record_id,
-            "user_id": current_user.id,
-            "input_text": payload.input_text,
-            "risk": payload.result.get("risk"),
-            "score": payload.result.get("score"),
-            "reasons": payload.result,
-        },
-    )
-
-    db.commit()
-
-    return {"status": "saved", "id": record_id}
 
 
 # =====================================================
@@ -102,12 +43,12 @@ def list_history(
                 reasons,
                 created_at
             FROM scan_history
-            WHERE user_id = :user_id
+            WHERE user_id = CAST(:user_id AS uuid)
             ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
         """),
         {
-            "user_id": current_user.id,
+            "user_id": str(current_user.id),
             "limit": limit,
             "offset": offset,
         },
@@ -117,9 +58,11 @@ def list_history(
         text("""
             SELECT COUNT(*)
             FROM scan_history
-            WHERE user_id = :user_id
+            WHERE user_id = CAST(:user_id AS uuid)
         """),
-        {"user_id": current_user.id},
+        {
+            "user_id": str(current_user.id),
+        },
     ).scalar()
 
     return {
@@ -149,11 +92,12 @@ def get_history(
                 reasons,
                 created_at
             FROM scan_history
-            WHERE id = :id AND user_id = :user_id
+            WHERE id = CAST(:id AS uuid)
+              AND user_id = CAST(:user_id AS uuid)
         """),
         {
             "id": history_id,
-            "user_id": current_user.id,
+            "user_id": str(current_user.id),
         },
     ).mappings().first()
 
@@ -175,11 +119,12 @@ def delete_history(
     result = db.execute(
         text("""
             DELETE FROM scan_history
-            WHERE id = :id AND user_id = :user_id
+            WHERE id = CAST(:id AS uuid)
+              AND user_id = CAST(:user_id AS uuid)
         """),
         {
             "id": history_id,
-            "user_id": current_user.id,
+            "user_id": str(current_user.id),
         },
     )
 
