@@ -20,7 +20,7 @@ security = HTTPBearer()
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # ---------------- rate limit ----------------
-RATE_LIMIT = {}  # key -> {count, ts}
+RATE_LIMIT = {}
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 60
 
@@ -51,7 +51,7 @@ def create_access_token(subject: str):
     now = datetime.now(tz=timezone.utc)
     payload = {
         "sub": subject,
-        "iat": int(now.timestamp()),  # ✅ store as UNIX timestamp
+        "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -62,6 +62,7 @@ def get_current_user(
     db: Session = Depends(get_db),
 ):
     token = credentials.credentials
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
@@ -75,15 +76,15 @@ def get_current_user(
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        # ✅ FIX: compare UTC-aware datetimes
-        if user.updated_at:
+        # ✅ SESSION INVALIDATION ONLY ON PASSWORD CHANGE
+        if user.password_changed_at:
             token_issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
 
-            user_updated_at = user.updated_at
-            if user_updated_at.tzinfo is None:
-                user_updated_at = user_updated_at.replace(tzinfo=timezone.utc)
+            pwd_changed_at = user.password_changed_at
+            if pwd_changed_at.tzinfo is None:
+                pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
 
-            if token_issued_at < user_updated_at:
+            if token_issued_at < pwd_changed_at:
                 raise HTTPException(status_code=401, detail="Session expired")
 
         return user
@@ -123,15 +124,19 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     if exists:
         raise HTTPException(status_code=400, detail="User already exists")
 
+    now = datetime.now(tz=timezone.utc)
+
     user = User(
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
         role=payload.role,
         password_hash=hash_password(payload.password),
+        password_changed_at=now,
     )
     db.add(user)
     db.commit()
+
     return {"status": "signup_success"}
 
 
@@ -144,6 +149,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         .filter((User.email == payload.identifier) | (User.phone == payload.identifier))
         .first()
     )
+
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
