@@ -16,7 +16,11 @@ class User(Base):
     phone = Column(String, unique=True)
     role = Column(String, nullable=False)
 
+    # 🔐 AUTH
     password_hash = Column(String, nullable=False)
+
+    # 💳 PLAN MODEL (FREE | PAID)
+    plan = Column(String, nullable=False, default="FREE")
 
     created_at = Column(
         DateTime(timezone=True),
@@ -29,7 +33,7 @@ class User(Base):
         onupdate=func.now()
     )
 
-    # 🔥 REQUIRED FOR AUTH (NEW)
+    # 🔥 SESSION INVALIDATION SUPPORT
     password_changed_at = Column(
         DateTime(timezone=True),
         nullable=True

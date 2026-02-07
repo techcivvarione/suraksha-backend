@@ -4,21 +4,21 @@ from datetime import datetime
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.db import get_db
 from app.models.user import User
 from app.routes.auth import get_current_user
 
-
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 
-# ---------- models ----------
+# ---------- MODELS ----------
 class SubscribeRequest(BaseModel):
     categories: list[str]
 
 
-# ---------- helpers ----------
+# ---------- HELPERS ----------
 def severity_for(category: str, alert_type: str) -> str:
     if alert_type == "history":
         return "HIGH"
@@ -29,25 +29,34 @@ def severity_for(category: str, alert_type: str) -> str:
     return "LOW"
 
 
-# ---------- routes ----------
+# ---------- ROUTES ----------
 @router.post("/subscribe")
 def subscribe_alerts(
     payload: SubscribeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 🔴 REMOVE OLD SUBSCRIPTIONS (FIXED)
     db.execute(
-        "delete from alert_subscriptions where user_id = :uid",
+        text("""
+            DELETE FROM alert_subscriptions
+            WHERE user_id = CAST(:uid AS uuid)
+        """),
         {"uid": str(current_user.id)},
     )
 
+    # 🟢 INSERT NEW SUBSCRIPTIONS
     for category in payload.categories:
         db.execute(
-            """
-            insert into alert_subscriptions (id, user_id, category, created_at)
-            values (:id, :uid, :cat, now())
-            on conflict do nothing
-            """,
+            text("""
+                INSERT INTO alert_subscriptions (
+                    id, user_id, category, created_at
+                )
+                VALUES (
+                    :id, CAST(:uid AS uuid), :cat, now()
+                )
+                ON CONFLICT DO NOTHING
+            """),
             {
                 "id": str(uuid.uuid4()),
                 "uid": str(current_user.id),
@@ -65,18 +74,18 @@ def get_alerts(
     current_user: User = Depends(get_current_user),
 ):
     rows = db.execute(
-        """
-        select *
-        from alerts
-        where user_id = :uid
-        order by
-            case severity
-                when 'HIGH' then 1
-                when 'MEDIUM' then 2
-                else 3
-            end,
-            created_at desc
-        """,
+        text("""
+            SELECT *
+            FROM alerts
+            WHERE user_id = CAST(:uid AS uuid)
+            ORDER BY
+                CASE severity
+                    WHEN 'HIGH' THEN 1
+                    WHEN 'MEDIUM' THEN 2
+                    ELSE 3
+                END,
+                created_at DESC
+        """),
         {"uid": str(current_user.id)},
     ).mappings().all()
 
@@ -90,48 +99,54 @@ def refresh_alerts(
 ):
     created = 0
 
-    # ---- subscriptions ----
+    # ---------- SUBSCRIPTIONS ----------
     subs = db.execute(
-        "select category from alert_subscriptions where user_id = :uid",
+        text("""
+            SELECT category
+            FROM alert_subscriptions
+            WHERE user_id = CAST(:uid AS uuid)
+        """),
         {"uid": str(current_user.id)},
     ).scalars().all()
 
     if not subs:
         return {"status": "no_subscriptions", "new_alerts_created": 0}
 
-    # ---- NEWS → ALERTS (DB BASED, NOT RSS) ----
+    # ---------- NEWS → ALERTS ----------
     news_rows = db.execute(
-        """
-        select id, headline, matter, category, source
-        from news
-        where category = any(:cats)
-        order by published_at desc
-        limit 50
-        """,
+        text("""
+            SELECT id, headline, matter, category, source
+            FROM news
+            WHERE category = ANY(:cats)
+            ORDER BY published_at DESC
+            LIMIT 50
+        """),
         {"cats": subs},
     ).mappings().all()
 
     for news in news_rows:
         exists = db.execute(
-            """
-            select 1 from alerts
-            where user_id = :uid and source = :src
-            """,
+            text("""
+                SELECT 1 FROM alerts
+                WHERE user_id = CAST(:uid AS uuid)
+                  AND source = :src
+            """),
             {"uid": str(current_user.id), "src": news["source"]},
         ).first()
 
         if not exists:
             db.execute(
-                """
-                insert into alerts (
-                    id, user_id, type, title, message,
-                    category, severity, source, read, created_at
-                )
-                values (
-                    :id, :uid, 'news', :title, :msg,
-                    :cat, :sev, :src, false, now()
-                )
-                """,
+                text("""
+                    INSERT INTO alerts (
+                        id, user_id, type, title, message,
+                        category, severity, source, read, created_at
+                    )
+                    VALUES (
+                        :id, CAST(:uid AS uuid), 'news',
+                        :title, :msg,
+                        :cat, :sev, :src, false, now()
+                    )
+                """),
                 {
                     "id": str(uuid.uuid4()),
                     "uid": str(current_user.id),
@@ -144,19 +159,19 @@ def refresh_alerts(
             )
             created += 1
 
-    # ---- HISTORY → ALERTS (UNCHANGED LOGIC) ----
+    # ---------- HISTORY → ALERTS ----------
     rows = db.execute(
-        """
-        select input_text
-        from scan_history
-        where user_id = :uid
-        """,
+        text("""
+            SELECT input_text
+            FROM scan_history
+            WHERE user_id = CAST(:uid AS uuid)
+        """),
         {"uid": str(current_user.id)},
     ).scalars().all()
 
     keyword_count = {}
-    for text in rows:
-        t = text.lower()
+    for text_val in rows:
+        t = text_val.lower()
         for k in ["otp", "upi", "bank", "lottery", "job"]:
             if k in t:
                 keyword_count[k] = keyword_count.get(k, 0) + 1
@@ -165,28 +180,29 @@ def refresh_alerts(
         if count >= 2:
             src = f"history-{k}"
             exists = db.execute(
-                """
-                select 1 from alerts
-                where user_id = :uid and source = :src
-                """,
+                text("""
+                    SELECT 1 FROM alerts
+                    WHERE user_id = CAST(:uid AS uuid)
+                      AND source = :src
+                """),
                 {"uid": str(current_user.id), "src": src},
             ).first()
 
             if not exists:
                 db.execute(
-                    """
-                    insert into alerts (
-                        id, user_id, type, title, message,
-                        category, severity, source, read, created_at
-                    )
-                    values (
-                        :id, :uid, 'history',
-                        'Repeated scam pattern detected',
-                        :msg,
-                        'Personal Risk', 'HIGH',
-                        :src, false, now()
-                    )
-                    """,
+                    text("""
+                        INSERT INTO alerts (
+                            id, user_id, type, title, message,
+                            category, severity, source, read, created_at
+                        )
+                        VALUES (
+                            :id, CAST(:uid AS uuid), 'history',
+                            'Repeated scam pattern detected',
+                            :msg,
+                            'Personal Risk', 'HIGH',
+                            :src, false, now()
+                        )
+                    """),
                     {
                         "id": str(uuid.uuid4()),
                         "uid": str(current_user.id),
@@ -206,12 +222,13 @@ def alert_summary(
     current_user: User = Depends(get_current_user),
 ):
     rows = db.execute(
-        """
-        select severity, count(*)
-        from alerts
-        where user_id = :uid and read = false
-        group by severity
-        """,
+        text("""
+            SELECT severity, COUNT(*)
+            FROM alerts
+            WHERE user_id = CAST(:uid AS uuid)
+              AND read = false
+            GROUP BY severity
+        """),
         {"uid": str(current_user.id)},
     ).all()
 

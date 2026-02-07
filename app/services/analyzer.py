@@ -8,6 +8,8 @@ import os
 import json
 from openai import OpenAI
 
+from app.services.breach.manager import get_breach_provider
+
 # =========================================================
 # CONFIG
 # =========================================================
@@ -21,9 +23,8 @@ FEEDS_DIR = BASE_DIR / "feeds"
 OPENPHISH_FILE = FEEDS_DIR / "openphish.txt"
 URLHAUS_FILE = FEEDS_DIR / "urlhaus.txt"
 
-
 # =========================================================
-# STATIC OFFLINE DATA
+# STATIC DATA
 # =========================================================
 
 SHORTENER_DOMAINS = {
@@ -64,7 +65,7 @@ SCAM_KEYWORDS = {
 }
 
 # =========================================================
-# FEED LOADERS
+# FEEDS
 # =========================================================
 
 def load_feed(file_path: Path) -> set[str]:
@@ -82,16 +83,6 @@ URLHAUS_URLS = load_feed(URLHAUS_FILE) if USE_HYBRID_FEEDS else set()
 # =========================================================
 # HELPERS
 # =========================================================
-
-def detect_scan_type(content: str) -> str:
-    if content.strip().startswith(("http://", "https://")):
-        return "link"
-    if "subject:" in content.lower() or "from:" in content.lower():
-        return "email"
-    if len(content) < 300:
-        return "sms"
-    return "text"
-
 
 def get_domain_age_days(domain: str):
     try:
@@ -112,9 +103,8 @@ def extract_url(text: str):
     match = re.search(r"(https?://[^\s]+)", text)
     return match.group(0) if match else None
 
-
 # =========================================================
-# TEXT ANALYSIS
+# THREAT ANALYSIS
 # =========================================================
 
 def analyze_text_message(text: str):
@@ -130,10 +120,6 @@ def analyze_text_message(text: str):
 
     return {"score": score, "reasons": reasons}
 
-
-# =========================================================
-# URL ANALYSIS
-# =========================================================
 
 def analyze_url(url: str):
     reasons = []
@@ -188,28 +174,25 @@ def analyze_url(url: str):
 
     return {"score": score, "reasons": reasons}
 
-
 # =========================================================
-# OPENAI DEEP SCAN
+# AI SCAN
 # =========================================================
 
-def ai_deep_scan(content: str, scan_type: str):
+def ai_deep_scan(content: str):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return {
             "risk_level": "SUSPICIOUS",
             "confidence": 50,
-            "reasons": ["AI analysis unavailable (missing API key)"],
-            "summary": "Heuristic scan completed without AI.",
+            "reasons": ["AI analysis unavailable"],
+            "summary": "Heuristic scan completed.",
             "recommended_action": "Proceed with caution."
         }
 
     client = OpenAI(api_key=api_key)
 
     prompt = f"""
-You are a cybersecurity analyst for Indian users.
-
-Analyze the following {scan_type} and return STRICT JSON.
+Analyze the following content and return STRICT JSON.
 
 Fields:
 - risk_level: SAFE | SUSPICIOUS | DANGEROUS
@@ -235,21 +218,19 @@ Content:
     start, end = raw.find("{"), raw.rfind("}") + 1
     return json.loads(raw[start:end])
 
-
 # =========================================================
 # MAIN ENTRY
 # =========================================================
 
-def analyze_input_full(content: str):
-    scan_type = detect_scan_type(content)
-    total_score = 0
-    reasons = []
+def analyze_input_full(scan_type: str, content: str, user_plan: str):
+    scan_type = scan_type.upper()
+    is_paid = user_plan == "PAID"
 
-    if scan_type == "link":
-        r = analyze_url(content)
-        total_score += r["score"]
-        reasons.extend(r["reasons"])
-    else:
+    # 1️⃣ THREAT
+    if scan_type == "THREAT":
+        total_score = 0
+        reasons = []
+
         t = analyze_text_message(content)
         total_score += t["score"]
         reasons.extend(t["reasons"])
@@ -260,23 +241,71 @@ def analyze_input_full(content: str):
             total_score += u["score"]
             reasons.extend(u["reasons"])
 
-    if total_score < 30:
+        if total_score < 30:
+            return {
+                "risk": "low",
+                "score": 85,
+                "reasons": ["No strong scam indicators found"]
+            }
+
+        ai = ai_deep_scan(content)
+
         return {
-            "risk_level": "SAFE",
-            "confidence": 85,
-            "scan_type": scan_type,
-            "reasons": reasons,
-            "summary": "No strong scam indicators found.",
-            "recommended_action": "No action needed. Stay alert."
+            "risk": ai["risk_level"].lower(),
+            "score": ai["confidence"],
+            "reasons": reasons + ai["reasons"]
         }
 
-    ai = ai_deep_scan(content, scan_type)
+    # 2️⃣ EMAIL
+    if scan_type == "EMAIL":
+        provider = get_breach_provider()
+        raw = provider.check_email(content)
 
-    return {
-        "risk_level": ai["risk_level"],
-        "confidence": ai["confidence"],
-        "scan_type": scan_type,
-        "reasons": reasons + ai["reasons"],
-        "summary": ai["summary"],
-        "recommended_action": ai["recommended_action"]
-    }
+        response = {
+            "risk": raw["risk"],
+            "score": raw["score"],
+            "count": raw.get("count", 0),
+            "reasons": raw["reasons"]
+        }
+
+        if is_paid:
+            response["sites"] = raw.get("sites", [])
+            response["domains"] = raw.get("domains", [])
+        else:
+            response["upgrade"] = {
+                "required": True,
+                "message": "Upgrade to see breached websites and domains",
+                "features": [
+                    "Full breach source list",
+                    "Password exposure details",
+                    "Unlimited scans"
+                ]
+            }
+
+        return response
+
+    # 3️⃣ PASSWORD
+    if scan_type == "PASSWORD":
+        provider = get_breach_provider()
+        raw = provider.check_password(content)
+
+        response = {
+            "risk": raw["risk"],
+            "score": raw["score"],
+            "count": raw.get("count", 0),
+            "reasons": raw["reasons"]
+        }
+
+        if not is_paid:
+            response["upgrade"] = {
+                "required": True,
+                "message": "Upgrade to see password breach details",
+                "features": [
+                    "Breach source visibility",
+                    "Advanced password risk scoring"
+                ]
+            }
+
+        return response
+
+    raise ValueError("Invalid scan type")

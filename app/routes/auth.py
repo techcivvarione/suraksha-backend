@@ -6,10 +6,10 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 
-import os
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.user import User
+from app.services.audit_logger import create_audit_log
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -77,7 +77,6 @@ def get_current_user(
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        # ✅ SESSION INVALIDATION ONLY ON PASSWORD CHANGE
         if user.password_changed_at:
             token_issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
 
@@ -151,10 +150,28 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         .first()
     )
 
+    # ❌ LOGIN FAILED
     if not user or not verify_password(payload.password, user.password_hash):
+        create_audit_log(
+            db=db,
+            user_id=user.id if user else None,
+            event_type="LOGIN_FAILED",
+            event_description="Failed login attempt",
+            request=request
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # ✅ LOGIN SUCCESS
     token = create_access_token(str(user.id))
+
+    create_audit_log(
+        db=db,
+        user_id=user.id,
+        event_type="LOGIN_SUCCESS",
+        event_description="User logged in successfully",
+        request=request
+    )
+
     return {"access_token": token, "token_type": "bearer"}
 
 

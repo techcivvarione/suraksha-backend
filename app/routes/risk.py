@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime
-
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.db import get_db
 from app.models.user import User
@@ -15,61 +14,45 @@ def user_risk_score(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    score = 0
-    reasons = []
-
-    # ---- HISTORY BASED SCORING (DB) ----
+    # ---- fetch scan history ----
     history_rows = db.execute(
-        """
-        select risk
-        from scan_history
-        where user_id = :uid
-        """,
+        text("""
+            SELECT risk
+            FROM scan_history
+            WHERE user_id = CAST(:uid AS uuid)
+        """),
         {"uid": str(current_user.id)},
     ).scalars().all()
 
+    if not history_rows:
+        return {
+            "risk_score": 0,
+            "risk_level": "Low",
+            "message": "No scans found yet"
+        }
+
+    # ---- scoring logic ----
+    score = 0
     for risk in history_rows:
         if risk == "high":
-            score += 30
-            reasons.append("High-risk scam detected previously")
-        elif risk == "medium":
             score += 15
-            reasons.append("Medium-risk scam detected previously")
+        elif risk == "medium":
+            score += 7
+        elif risk == "low":
+            score += 2
 
-    # ---- ALERT BASED SCORING (DB) ----
-    alert_rows = db.execute(
-        """
-        select severity, type, read
-        from alerts
-        where user_id = :uid
-        """,
-        {"uid": str(current_user.id)},
-    ).all()
+    score = min(score, 100)
 
-    for severity, alert_type, read in alert_rows:
-        if not read:
-            if severity == "HIGH":
-                score += 25
-                reasons.append("Unread high-severity alert")
-            elif severity == "MEDIUM":
-                score += 10
-                reasons.append("Unread medium-severity alert")
-
-        if alert_type == "history":
-            score += 40
-            reasons.append("Repeated scam pattern detected")
-
-    # ---- FINAL RISK LEVEL ----
+    # ---- level mapping ----
     if score >= 70:
         level = "High"
-    elif score >= 30:
+    elif score >= 35:
         level = "Medium"
     else:
         level = "Low"
 
     return {
-        "risk_level": level,
         "risk_score": score,
-        "factors": list(set(reasons)),
-        "evaluated_at": datetime.utcnow(),
+        "risk_level": level,
+        "total_scans": len(history_rows),
     }

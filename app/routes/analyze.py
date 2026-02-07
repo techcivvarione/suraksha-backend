@@ -10,36 +10,87 @@ from app.db import get_db
 from app.models.analyze import AnalyzeRequest, AnalyzeResponse
 from app.routes.auth import get_current_user
 from app.models.user import User
+from app.services.trusted_alerts import notify_trusted_contacts
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
-# ---------------- LIMITS ----------------
-DAILY_ANALYZE_LIMIT = 20
+# =========================================================
+# PLAN-BASED RATE LIMITS (DAILY)
+# =========================================================
+
+PLAN_LIMITS = {
+    "FREE": {
+        "THREAT": 10,
+        "EMAIL": 3,
+        "PASSWORD": 3,
+    },
+    "PAID": {
+        "THREAT": 100,
+        "EMAIL": 20,
+        "PASSWORD": 20,
+    },
+}
+
+# In-memory (safe for now, Redis later)
 USAGE_COUNTER = {}
-ANALYZE_RATE = {}
-MAX_ANALYZE = 20
-
-# ---------------- RATE LIMIT ----------------
-def analyze_rate_limit(user_id: str):
-    count = ANALYZE_RATE.get(user_id, 0)
-    if count >= MAX_ANALYZE:
-        raise HTTPException(status_code=429, detail="Analyze limit reached")
-    ANALYZE_RATE[user_id] = count + 1
 
 
-def update_usage(user_id: str) -> int:
+# =========================================================
+# RATE LIMIT HELPERS
+# =========================================================
+
+def rate_limit_error(plan: str, scan_type: str, limit: int):
+    payload = {
+        "error": "RATE_LIMIT",
+        "scan_type": scan_type,
+        "message": f"You’ve reached today’s {scan_type.title()} scan limit",
+        "limit": limit,
+        "plan": plan,
+    }
+
+    if plan == "FREE":
+        payload["upgrade"] = {
+            "required": True,
+            "message": "Upgrade to continue scanning",
+            "benefits": [
+                "Higher daily scan limits",
+                "Full breach source visibility",
+                "OCR scam detection",
+                "Trusted family alerts",
+            ],
+        }
+
+    raise HTTPException(status_code=429, detail=payload)
+
+
+def enforce_rate_limit(user_id: str, plan: str, scan_type: str):
     today = date.today()
-    record = USAGE_COUNTER.get(user_id)
+    plan = plan.upper()
+    scan_type = scan_type.upper()
+
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])
+    max_allowed = limits.get(scan_type)
+
+    if max_allowed is None:
+        return
+
+    key = f"{user_id}:{scan_type}"
+    record = USAGE_COUNTER.get(key)
 
     if not record or record["date"] != today:
-        USAGE_COUNTER[user_id] = {"date": today, "count": 1}
-    else:
-        record["count"] += 1
+        USAGE_COUNTER[key] = {"date": today, "count": 1}
+        return
 
-    return USAGE_COUNTER[user_id]["count"]
+    if record["count"] >= max_allowed:
+        rate_limit_error(plan, scan_type, max_allowed)
+
+    record["count"] += 1
 
 
-# ---------------- ROUTE ----------------
+# =========================================================
+# ROUTE
+# =========================================================
+
 @router.post("/", response_model=AnalyzeResponse)
 def analyze_input(
     request_data: AnalyzeRequest,
@@ -52,52 +103,42 @@ def analyze_input(
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
+    scan_type = request_data.type.upper()
+    user_plan = current_user.plan or "FREE"
+
+    # ---------- RATE LIMIT ----------
+    enforce_rate_limit(
+        user_id=str(current_user.id),
+        plan=user_plan,
+        scan_type=scan_type,
+    )
+
+    # ---------- ANALYZE ----------
     try:
-        analyze_rate_limit(str(current_user.id))
-        result = analyze_input_full(request_data.content)
+        result = analyze_input_full(
+            scan_type=scan_type,
+            content=request_data.content,
+            user_plan=user_plan,
+        )
     except HTTPException:
         raise
     except Exception:
         logging.exception("Analyze failed")
         raise HTTPException(status_code=400, detail="Analyze failed")
 
-    # ---------------- RISK NORMALIZATION (CRITICAL FIX) ----------------
-    risk_map = {
-        "safe": "low",
-        "low": "low",
-        "medium": "medium",
-        "high": "high",
-    }
+    # ---------- HISTORY REDACTION ----------
+    if scan_type == "THREAT":
+        stored_input = request_data.content
+    elif scan_type == "EMAIL":
+        stored_input = "EMAIL_CHECK_REDACTED"
+    elif scan_type == "PASSWORD":
+        stored_input = "PASSWORD_CHECK_REDACTED"
+    else:
+        stored_input = "REDACTED"
 
-    normalized_risk = risk_map.get(
-        result["risk_level"].lower(),
-        "low"
-    )
+    # ---------- SAVE HISTORY ----------
+    scan_id = str(uuid.uuid4())
 
-    # ---------------- RESPONSE DATA ----------------
-    clean_reasons = {
-        "summary": result["summary"],
-        "flags": result["reasons"],
-        "actions": [result["recommended_action"]],
-    }
-
-    response_reasons = [
-        result["summary"],
-        "Why this was flagged:",
-        *result["reasons"],
-        "What you should do:",
-        result["recommended_action"],
-    ]
-
-    count = update_usage(str(current_user.id))
-
-    if count > DAILY_ANALYZE_LIMIT:
-        response_reasons.insert(
-            0,
-            f"Usage notice: You have used {count} analyses today."
-        )
-
-    # ---------------- SAVE HISTORY (NOW GUARANTEED) ----------------
     try:
         db.execute(
             text("""
@@ -121,23 +162,35 @@ def analyze_input(
                 )
             """),
             {
-                "id": str(uuid.uuid4()),
+                "id": scan_id,
                 "user_id": str(current_user.id),
-                "input_text": request_data.content,
-                "risk": normalized_risk,   # ✅ FIXED
-                "score": result["confidence"],
-                "reasons": json.dumps(clean_reasons),
-            }
+                "input_text": stored_input,
+                "risk": result["risk"],
+                "score": result["score"],
+                "reasons": json.dumps(result["reasons"]),
+            },
         )
         db.commit()
 
-        logging.info(f"✅ Scan history saved for user {current_user.id}")
+        logging.info(f"✅ {scan_type} scan saved for user {current_user.id}")
 
     except Exception:
         logging.exception("❌ Failed to save scan history")
 
+    # ---------- TRUSTED CIRCLE ALERT (HIGH RISK ONLY) ----------
+    if result["risk"] == "high":
+        try:
+            notify_trusted_contacts(
+                db=db,
+                user_id=str(current_user.id),
+                scan_id=scan_id,
+            )
+        except Exception:
+            logging.exception("⚠️ Trusted alert failed")
+
+    # ---------- RESPONSE ----------
     return AnalyzeResponse(
-        risk=normalized_risk,
-        score=result["confidence"],
-        reasons=response_reasons,
+        risk=result["risk"],
+        score=result["score"],
+        reasons=result["reasons"],
     )
