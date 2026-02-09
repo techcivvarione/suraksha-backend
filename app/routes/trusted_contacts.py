@@ -1,12 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import uuid
-from datetime import datetime
-from fastapi import Path
-
 from uuid import UUID
+import uuid
+
 from app.db import get_db
 from app.routes.auth import get_current_user
 from app.models.user import User
@@ -24,6 +22,19 @@ class TrustedContactCreate(BaseModel):
     contact_phone: str | None = None
 
 
+# ---------------- HELPERS ----------------
+
+PLAN_LIMITS = {
+    "FREE": 1,
+    "FAMILY_BASIC": 3,
+    "FAMILY_PRO": 6,
+}
+
+
+def get_contact_limit(plan: str) -> int:
+    return PLAN_LIMITS.get(plan.upper(), 1)
+
+
 # ---------------- ROUTES ----------------
 
 @router.post("/")
@@ -36,6 +47,30 @@ def add_trusted_contact(
         raise HTTPException(
             status_code=400,
             detail="At least email or phone is required",
+        )
+
+    # ---- ENFORCE PLAN LIMIT ----
+    current_count = db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM trusted_contacts
+            WHERE owner_user_id = CAST(:uid AS uuid)
+              AND status = 'ACTIVE'
+        """),
+        {"uid": str(current_user.id)},
+    ).scalar()
+
+    max_allowed = get_contact_limit(current_user.plan)
+
+    if current_count >= max_allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "PLAN_LIMIT_REACHED",
+                "message": f"Your plan allows only {max_allowed} trusted contact(s)",
+                "plan": current_user.plan,
+                "upgrade_required": current_user.plan == "FREE",
+            },
         )
 
     db.execute(
@@ -69,7 +104,6 @@ def add_trusted_contact(
     )
 
     db.commit()
-
     return {"status": "trusted_contact_added"}
 
 
@@ -94,15 +128,12 @@ def list_trusted_contacts(
         {"uid": str(current_user.id)},
     ).mappings().all()
 
-    return {
-        "count": len(rows),
-        "data": rows,
-    }
+    return {"count": len(rows), "data": rows}
 
 
 @router.delete("/{contact_id}")
 def deactivate_trusted_contact(
-    contact_id: UUID = Path(..., description="Trusted contact UUID"),
+    contact_id: UUID = Path(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -114,7 +145,7 @@ def deactivate_trusted_contact(
               AND owner_user_id = CAST(:uid AS uuid)
         """),
         {
-            "cid": contact_id,
+            "cid": str(contact_id),
             "uid": str(current_user.id),
         },
     )

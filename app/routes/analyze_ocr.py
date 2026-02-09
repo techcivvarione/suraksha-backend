@@ -71,35 +71,38 @@ def analyze_ocr(
     # ---------- SAVE HISTORY (REDACTED) ----------
     try:
         db.execute(
-            text("""
-                INSERT INTO scan_history (
-                    id,
-                    user_id,
-                    input_text,
-                    risk,
-                    score,
-                    reasons,
-                    created_at
-                )
-                VALUES (
-                    :id,
-                    :user_id,
-                    :input_text,
-                    :risk,
-                    :score,
-                    :reasons,
-                    now()
-                )
-            """),
-            {
-                "id": str(uuid.uuid4()),
-                "user_id": str(current_user.id),
-                "input_text": "OCR_IMAGE_REDACTED",
-                "risk": result["risk"],
-                "score": result["score"],
-                "reasons": json.dumps(result["reasons"]),
-            },
+    text("""
+        INSERT INTO scan_history (
+            id,
+            user_id,
+            input_text,
+            risk,
+            score,
+            reasons,
+            scan_type,
+            created_at
         )
+        VALUES (
+            :id,
+            :user_id,
+            :input_text,
+            :risk,
+            :score,
+            :reasons,
+            'OCR',
+            now()
+        )
+    """),
+    {
+        "id": str(uuid.uuid4()),
+        "user_id": str(current_user.id),
+        "input_text": "OCR_IMAGE_REDACTED",
+        "risk": result["risk"],
+        "score": result["score"],
+        "reasons": json.dumps(result["reasons"]),
+    },
+)
+
         db.commit()
     except Exception:
         logging.exception("Failed to save OCR scan history")

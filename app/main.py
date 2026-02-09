@@ -29,6 +29,25 @@ app = FastAPI(
 )
 
 # -------------------------------------------------
+# GLOBAL SECURITY MIDDLEWARE (FIRST)
+# -------------------------------------------------
+
+from app.middleware.security import SecurityLoggingMiddleware
+app.add_middleware(SecurityLoggingMiddleware)
+
+# -------------------------------------------------
+# CORS (OPEN FOR NOW — LOCK LATER)
+# -------------------------------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TODO: restrict in prod
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------------------------------------
 # SAFE STARTUP HOOK (NEVER BLOCK APP)
 # -------------------------------------------------
 
@@ -36,7 +55,6 @@ app = FastAPI(
 def startup():
     logger.info("🚀 GO Suraksha API starting up")
 
-    # RSS ingestion (non-critical)
     try:
         from app.services.news_ingestor import ingest_rss
         ingest_rss()
@@ -47,7 +65,7 @@ def startup():
     logger.info("✅ Startup completed")
 
 # -------------------------------------------------
-# ROUTES (ORDER MATTERS: SIMPLE → COMPLEX)
+# ROUTES
 # -------------------------------------------------
 
 from app.routes.auth import router as auth_router
@@ -67,6 +85,17 @@ from app.routes.trusted import router as trusted_router
 from app.routes.alerts import router as alerts_router
 from app.routes.ai import router as ai_router
 from app.routes.risk import router as risk_router
+from app.routes.risk_timeline import router as risk_timeline_router
+from app.routes.risk_insights import router as risk_insights_router
+from app.routes.ai_explanations import router as ai_explanations_router
+
+from app.routes.family import router as family_router
+from app.routes import trusted_alerts
+from app.routes.cyber_card import router as cyber_card_router
+from app.routes.scam_confirmation import router as scam_confirmation_router
+from app.routes.cyber_card_history import router as cyber_card_history_router
+
+
 
 # -------------------------------------------------
 # REGISTER ROUTERS
@@ -89,21 +118,20 @@ app.include_router(trusted_router)
 app.include_router(alerts_router)
 app.include_router(ai_router)
 app.include_router(risk_router)
+app.include_router(risk_timeline_router)
+app.include_router(risk_insights_router)
+app.include_router(ai_explanations_router)
+
+app.include_router(family_router)
+app.include_router(trusted_alerts.router)
+app.include_router(cyber_card_router)
+app.include_router(scam_confirmation_router)
+app.include_router(cyber_card_history_router)
+
+
 
 # -------------------------------------------------
-# CORS (OPEN FOR NOW — LOCK LATER)
-# -------------------------------------------------
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict in prod
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -------------------------------------------------
-# HEALTH CHECK (OPTIONAL BUT RECOMMENDED)
+# HEALTH CHECK
 # -------------------------------------------------
 
 @app.get("/health")

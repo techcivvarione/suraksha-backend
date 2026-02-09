@@ -1,12 +1,20 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from datetime import datetime
 
 from app.db import get_db
-from app.models.user import User
 from app.routes.auth import get_current_user
+from app.models.user import User
 
-router = APIRouter(prefix="/risk", tags=["User Risk"])
+router = APIRouter(prefix="/risk", tags=["Risk"])
+
+
+RISK_WEIGHTS = {
+    "low": 2,
+    "medium": -5,
+    "high": -15,
+}
 
 
 @router.get("/score")
@@ -14,45 +22,40 @@ def user_risk_score(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # ---- fetch scan history ----
-    history_rows = db.execute(
+    rows = db.execute(
         text("""
             SELECT risk
             FROM scan_history
             WHERE user_id = CAST(:uid AS uuid)
+              AND created_at >= NOW() - INTERVAL '30 days'
         """),
         {"uid": str(current_user.id)},
     ).scalars().all()
 
-    if not history_rows:
-        return {
-            "risk_score": 0,
-            "risk_level": "Low",
-            "message": "No scans found yet"
-        }
+    score = 100
 
-    # ---- scoring logic ----
-    score = 0
-    for risk in history_rows:
-        if risk == "high":
-            score += 15
-        elif risk == "medium":
-            score += 7
-        elif risk == "low":
-            score += 2
+    for risk in rows:
+        weight = RISK_WEIGHTS.get(risk.lower(), 0)
+        score += weight
 
-    score = min(score, 100)
+    # clamp score
+    score = max(0, min(100, score))
 
-    # ---- level mapping ----
-    if score >= 70:
-        level = "High"
-    elif score >= 35:
-        level = "Medium"
+    if score >= 80:
+        level = "LOW"
+        message = "Your security posture looks strong."
+    elif score >= 50:
+        level = "MEDIUM"
+        message = "Some risky activity detected."
     else:
-        level = "Low"
+        level = "HIGH"
+        message = "Immediate attention recommended."
 
     return {
-        "risk_score": score,
+        "score": score,
         "risk_level": level,
-        "total_scans": len(history_rows),
+        "window": "30_days",
+        "total_scans": len(rows),
+        "generated_at": datetime.utcnow(),
+        "summary": message,
     }

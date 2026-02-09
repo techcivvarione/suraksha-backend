@@ -14,6 +14,7 @@ from app.models.scam_report import ScamReport
 from app.routes.auth import get_current_user, verify_password, hash_password
 from app.services.audit_logger import create_audit_log
 from app.services.evidence_exporter import generate_evidence_bundle
+from app.services.cyber_complaint_generator import generate_cyber_complaint_text
 
 router = APIRouter(prefix="/security", tags=["Account Security"])
 
@@ -34,6 +35,23 @@ class ScamReportRequest(BaseModel):
     description: str
     source: Optional[str] = None
     scam_value: Optional[str] = None
+
+
+# 🔹 NEW — Cyber Complaint Preview
+class CyberComplaintPreviewRequest(BaseModel):
+    scam_type: str
+    incident_date: str
+    description: str
+    loss_amount: Optional[str] = None
+
+
+# 🔹 NEW — Cyber SOS Request (FIX)
+class CyberSOSRequest(BaseModel):
+    scam_type: str
+    incident_date: str
+    description: str
+    loss_amount: Optional[str] = None
+    source: Optional[str] = None
 
 
 # =========================================================
@@ -118,66 +136,31 @@ def security_health_score(
               AND created_at >= :since
             GROUP BY risk
         """),
-        {
-            "user_id": str(current_user.id),
-            "since": since,
-        },
+        {"user_id": str(current_user.id), "since": since},
     ).mappings().all()
 
-    # base score
     score = 100
-
-    stats = {
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-    }
-
+    stats = {"high": 0, "medium": 0, "low": 0}
     last_scan_at = None
 
     for row in rows:
-        risk = row["risk"]
-        count = row["count"]
-        stats[risk] += count
-
+        stats[row["risk"]] += row["count"]
         if row["last_scan"]:
-            if not last_scan_at or row["last_scan"] > last_scan_at:
-                last_scan_at = row["last_scan"]
+            last_scan_at = max(last_scan_at or row["last_scan"], row["last_scan"])
 
-    # scoring logic (transparent)
     score -= stats["high"] * 20
     score -= stats["medium"] * 10
 
     if sum(stats.values()) == 0:
-        score -= 25  # no scans = blind spot
+        score -= 25
 
     score = max(0, min(100, score))
 
-    if score >= 80:
-        level = "good"
-        summary = "Your digital security posture is strong."
-    elif score >= 50:
-        level = "warning"
-        summary = "Some risks detected. Review recent activity."
-    else:
-        level = "critical"
-        summary = "High risk detected. Immediate action advised."
-
-    recommendations = []
-
-    if stats["high"] > 0:
-        recommendations.append("Review high-risk scans and secure affected accounts")
-
-    if stats["medium"] > 0:
-        recommendations.append("Be cautious with links and unknown messages")
-
-    if sum(stats.values()) == 0:
-        recommendations.append("Run your first security scan to establish baseline")
+    level = "good" if score >= 80 else "warning" if score >= 50 else "critical"
 
     return {
         "score": score,
         "level": level,
-        "summary": summary,
         "window": "last_30_days",
         "signals": {
             "total_scans": sum(stats.values()),
@@ -186,7 +169,6 @@ def security_health_score(
             "low_risk": stats["low"],
             "last_scan_at": last_scan_at,
         },
-        "recommendations": recommendations,
     }
 
 
@@ -203,16 +185,10 @@ def get_audit_logs(
     current_user: User = Depends(get_current_user),
 ):
     query = db.query(AuditLog).filter(AuditLog.user_id == current_user.id)
-
     if event_type:
         query = query.filter(AuditLog.event_type == event_type)
 
-    logs = (
-        query.order_by(AuditLog.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    logs = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
 
     return {
         "count": len(logs),
@@ -262,43 +238,33 @@ def submit_scam_report(
         request=request,
     )
 
-    return {
-        "status": "reported",
-        "report_id": str(report.id),
-        "reported_at": report.reported_at,
-    }
+    return {"status": "reported", "report_id": str(report.id)}
 
 
-@router.get("/scam-reports")
-def get_my_scam_reports(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
+# =========================================================
+# 🧾 CYBER COMPLAINT PREVIEW (NEW)
+# =========================================================
+
+@router.post("/cyber-complaint/preview")
+def preview_cyber_complaint(
+    payload: CyberComplaintPreviewRequest,
     current_user: User = Depends(get_current_user),
 ):
-    reports = (
-        db.query(ScamReport)
-        .filter(ScamReport.user_id == current_user.id)
-        .order_by(ScamReport.reported_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+    complaint_text = generate_cyber_complaint_text(
+        user_name=current_user.name,
+        phone=current_user.phone or "Not provided",
+        email=current_user.email,
+        scam_type=payload.scam_type,
+        incident_date=payload.incident_date,
+        loss_amount=payload.loss_amount,
+        description=payload.description,
     )
 
     return {
-        "count": len(reports),
-        "data": [
-            {
-                "id": str(r.id),
-                "scam_type": r.scam_type,
-                "title": r.title,
-                "description": r.description,
-                "source": r.source,
-                "scam_value": r.scam_value,
-                "reported_at": r.reported_at,
-            }
-            for r in reports
-        ],
+        "helpline": "1930",
+        "portal": "https://cybercrime.gov.in",
+        "complaint_text": complaint_text.strip(),
+        "note": "Copy and paste this text into cybercrime.gov.in",
     }
 
 
@@ -323,10 +289,9 @@ def export_evidence(
 
     return JSONResponse(
         content=bundle,
-        headers={
-            "Content-Disposition": "attachment; filename=go-suraksha-evidence.json"
-        },
+        headers={"Content-Disposition": "attachment; filename=go-suraksha-evidence.json"},
     )
+
 
 @router.get("/health-trend")
 def health_trend(
@@ -346,25 +311,195 @@ def health_trend(
     ).mappings().all()
 
     if not rows:
-        return {
-            "window_days": days,
-            "current_score": None,
-            "trend": [],
-            "message": "Not enough data yet"
-        }
-
-    start = rows[0]["score"]
-    end = rows[-1]["score"]
-
-    change = end - start
+        return {"window_days": days, "trend": []}
 
     return {
         "window_days": days,
-        "current_score": end,
-        "trend": [
-            {"date": r["score_date"], "score": r["score"]}
-            for r in rows
+        "current_score": rows[-1]["score"],
+        "trend": [{"date": r["score_date"], "score": r["score"]} for r in rows],
+    }
+
+# =========================================================
+# 🚨 SCAM CONFIRMATION (FINAL – SCORE IMPACT)
+# =========================================================
+
+class ScamConfirmRequest(BaseModel):
+    scam_type: str
+    title: str
+    description: str
+    source: Optional[str] = None
+    scam_value: Optional[str] = None
+
+
+@router.post("/scam-confirm")
+def confirm_scam(
+    payload: ScamConfirmRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    FINAL confirmation.
+    Triggers Cyber Score penalty via monthly job.
+    """
+
+    # 1️⃣ Block multiple confirmations in same month
+    already = db.execute(
+        text("""
+            SELECT 1 FROM scam_reports
+            WHERE user_id = CAST(:uid AS uuid)
+              AND reported_at >= date_trunc('month', now())
+            LIMIT 1
+        """),
+        {"uid": str(current_user.id)},
+    ).first()
+
+    if already:
+        raise HTTPException(
+            status_code=400,
+            detail="Scam already confirmed this month",
+        )
+
+    # 2️⃣ Insert scam report
+    report = ScamReport(
+        user_id=current_user.id,
+        scam_type=payload.scam_type,
+        title=payload.title,
+        description=payload.description,
+        source=payload.source,
+        scam_value=payload.scam_value,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+
+    # 3️⃣ Audit log (CRITICAL)
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        event_type="SCAM_CONFIRMED",
+        event_description="User confirmed scam incident",
+        request=request,
+    )
+
+    # 4️⃣ Notify trusted + family (best-effort)
+    try:
+        from app.services.trusted_alerts import notify_trusted_contacts
+        from app.services.family_alerts import notify_family_head
+
+        notify_trusted_contacts(
+            db=db,
+            user_id=str(current_user.id),
+            scan_id=None,
+            alert_type="SCAM_CONFIRMED",
+        )
+
+        notify_family_head(
+            db=db,
+            member_user_id=str(current_user.id),
+            scan_id=None,
+        )
+    except Exception:
+        pass  # never block confirmation
+
+    return {
+        "status": "scam_confirmed",
+        "penalty": "-300 (this month only)",
+        "helpline": "1930",
+        "portal": "https://cybercrime.gov.in",
+        "next_steps": [
+            "Call 1930 immediately if financial loss occurred",
+            "File complaint on cybercrime.gov.in",
+            "Change passwords and secure accounts",
         ],
-        "change": change,
-        "direction": "improving" if change > 0 else "declining" if change < 0 else "stable"
+    }
+
+# =========================================================
+# CYBER SOS — SCAM CONFIRMATION & COMPLAINT ASSIST
+# =========================================================
+
+@router.post("/cyber-sos/confirm")
+def cyber_sos_confirm(
+    payload: CyberSOSRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # 🔒 One Cyber SOS per month (DB already enforces this)
+    month_start = db.execute(
+        text("SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')")
+    ).scalar()
+
+    existing = db.execute(
+        text("""
+            SELECT id
+            FROM scam_reports
+            WHERE user_id = CAST(:uid AS uuid)
+              AND reported_at >= :start
+        """),
+        {"uid": str(current_user.id), "start": month_start},
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "CYBER_SOS_ALREADY_USED",
+                "message": "Cyber SOS can be used only once per month"
+            }
+        )
+
+    # 🧾 Insert confirmed scam
+    report = ScamReport(
+        user_id=current_user.id,
+        scam_type=payload.scam_type,
+        title="Cyber SOS – Confirmed Scam",
+        description=payload.description,
+        source=payload.source,
+        scam_value=payload.loss_amount,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+
+    # 🧮 Cyber Card penalty handled automatically by monthly job
+
+    # 📝 Generate complaint text (copy-ready)
+    complaint_text = generate_cyber_complaint_text(
+        user=current_user,
+        scam_type=payload.scam_type,
+        incident_date=payload.incident_date,
+        description=payload.description,
+        loss_amount=payload.loss_amount,
+        source=payload.source,
+    )
+
+    # 🧾 Audit
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        event_type="CYBER_SOS_CONFIRMED",
+        event_description="User confirmed scam via Cyber SOS",
+        request=request,
+    )
+
+    return {
+        "status": "CYBER_SOS_CONFIRMED",
+        "emergency_contact": {
+            "india_helpline": "1930",
+            "portal": "https://cybercrime.gov.in"
+        },
+        "complaint_copy": complaint_text,
+        "next_steps": [
+            "Call 1930 immediately if financial fraud occurred",
+            "Paste the complaint text on cybercrime.gov.in",
+            "Upload screenshots, transaction proof, messages",
+            "Change passwords & secure affected accounts"
+        ]
     }

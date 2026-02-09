@@ -7,6 +7,8 @@ from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+
 from app.db import get_db
 from app.models.user import User
 from app.services.audit_logger import create_audit_log
@@ -20,12 +22,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-# ---------------- rate limit ----------------
 RATE_LIMIT = {}
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 60
 
 
+# ---------------- RATE LIMIT ----------------
 def rate_limit(key: str):
     now = datetime.utcnow().timestamp()
     record = RATE_LIMIT.get(key)
@@ -39,7 +41,7 @@ def rate_limit(key: str):
         raise HTTPException(status_code=429, detail="Too many attempts")
 
 
-# ---------------- helpers ----------------
+# ---------------- PASSWORD / TOKEN ----------------
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -58,13 +60,13 @@ def create_access_token(subject: str):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+# ---------------- AUTH DEPENDENCY ----------------
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ):
-    token = credentials.credentials
-
     try:
+        token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
         user_id = payload.get("sub")
@@ -78,13 +80,9 @@ def get_current_user(
             raise HTTPException(status_code=401, detail="Invalid token")
 
         if user.password_changed_at:
-            token_issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
-
-            pwd_changed_at = user.password_changed_at
-            if pwd_changed_at.tzinfo is None:
-                pwd_changed_at = pwd_changed_at.replace(tzinfo=timezone.utc)
-
-            if token_issued_at < pwd_changed_at:
+            issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
+            pwd_changed = user.password_changed_at.replace(tzinfo=timezone.utc)
+            if issued_at < pwd_changed:
                 raise HTTPException(status_code=401, detail="Session expired")
 
         return user
@@ -93,12 +91,11 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-# ---------------- models ----------------
+# ---------------- REQUEST MODELS ----------------
 class SignupRequest(BaseModel):
     name: str
     email: Optional[str]
     phone: Optional[str]
-    role: str
     password: str
     confirm_password: str
 
@@ -108,7 +105,7 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# ---------------- routes ----------------
+# ---------------- ROUTES ----------------
 @router.post("/signup")
 def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"signup:{request.client.host}")
@@ -116,11 +113,9 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
-    exists = (
-        db.query(User)
-        .filter((User.email == payload.email) | (User.phone == payload.phone))
-        .first()
-    )
+    exists = db.query(User).filter(
+        (User.email == payload.email) | (User.phone == payload.phone)
+    ).first()
     if exists:
         raise HTTPException(status_code=400, detail="User already exists")
 
@@ -130,12 +125,31 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
-        role=payload.role,
+        role="USER",          # ✅ FIXED: backend-controlled
+        plan="FREE",
         password_hash=hash_password(payload.password),
         password_changed_at=now,
     )
+
     db.add(user)
     db.commit()
+    db.refresh(user)
+
+    # 🔗 AUTO-LINK TRUSTED CONTACTS (SAFE)
+    if user.email:
+        db.execute(
+            text("""
+                UPDATE trusted_contacts
+                SET contact_user_id = :uid
+                WHERE contact_user_id IS NULL
+                  AND contact_email = :email
+            """),
+            {
+                "uid": str(user.id),
+                "email": user.email,
+            },
+        )
+        db.commit()
 
     return {"status": "signup_success"}
 
@@ -144,32 +158,28 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"login:{request.client.host}")
 
-    user = (
-        db.query(User)
-        .filter((User.email == payload.identifier) | (User.phone == payload.identifier))
-        .first()
-    )
+    user = db.query(User).filter(
+        (User.email == payload.identifier) | (User.phone == payload.identifier)
+    ).first()
 
-    # ❌ LOGIN FAILED
     if not user or not verify_password(payload.password, user.password_hash):
         create_audit_log(
             db=db,
             user_id=user.id if user else None,
             event_type="LOGIN_FAILED",
             event_description="Failed login attempt",
-            request=request
+            request=request,
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # ✅ LOGIN SUCCESS
     token = create_access_token(str(user.id))
 
     create_audit_log(
         db=db,
         user_id=user.id,
         event_type="LOGIN_SUCCESS",
-        event_description="User logged in successfully",
-        request=request
+        event_description="User logged in",
+        request=request,
     )
 
     return {"access_token": token, "token_type": "bearer"}
@@ -183,4 +193,5 @@ def me(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "phone": current_user.phone,
         "role": current_user.role,
+        "plan": current_user.plan,
     }

@@ -11,6 +11,8 @@ from app.models.analyze import AnalyzeRequest, AnalyzeResponse
 from app.routes.auth import get_current_user
 from app.models.user import User
 from app.services.trusted_alerts import notify_trusted_contacts
+from app.services.family_alerts import notify_family_head
+
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
@@ -33,7 +35,6 @@ PLAN_LIMITS = {
 
 # In-memory (safe for now, Redis later)
 USAGE_COUNTER = {}
-
 
 # =========================================================
 # RATE LIMIT HELPERS
@@ -104,7 +105,7 @@ def analyze_input(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     scan_type = request_data.type.upper()
-    user_plan = current_user.plan or "FREE"
+    user_plan = (current_user.plan or "FREE").upper()
 
     # ---------- RATE LIMIT ----------
     enforce_rate_limit(
@@ -120,6 +121,11 @@ def analyze_input(
             content=request_data.content,
             user_plan=user_plan,
         )
+
+        # Normalize AI output
+        if result.get("risk") == "dangerous":
+            result["risk"] = "high"
+
     except HTTPException:
         raise
     except Exception:
@@ -136,7 +142,7 @@ def analyze_input(
     else:
         stored_input = "REDACTED"
 
-    # ---------- SAVE HISTORY ----------
+    # ---------- SAVE SCAN HISTORY ----------
     scan_id = str(uuid.uuid4())
 
     try:
@@ -149,6 +155,7 @@ def analyze_input(
                     risk,
                     score,
                     reasons,
+                    scan_type,
                     created_at
                 )
                 VALUES (
@@ -158,6 +165,7 @@ def analyze_input(
                     :risk,
                     :score,
                     :reasons,
+                    :scan_type,
                     now()
                 )
             """),
@@ -168,16 +176,58 @@ def analyze_input(
                 "risk": result["risk"],
                 "score": result["score"],
                 "reasons": json.dumps(result["reasons"]),
+                "scan_type": scan_type,
             },
         )
         db.commit()
-
-        logging.info(f"✅ {scan_type} scan saved for user {current_user.id}")
-
     except Exception:
         logging.exception("❌ Failed to save scan history")
 
-    # ---------- TRUSTED CIRCLE ALERT (HIGH RISK ONLY) ----------
+    # ---------- UPDATE DAILY SECURITY SCORES ----------
+    try:
+        db.execute(
+            text("""
+                INSERT INTO daily_security_scores (
+                    id,
+                    user_id,
+                    score,
+                    high_risk,
+                    medium_risk,
+                    low_risk,
+                    total_scans,
+                    score_date,
+                    created_at
+                )
+                VALUES (
+                    gen_random_uuid(),
+                    :user_id,
+                    0,
+                    :high,
+                    :medium,
+                    :low,
+                    1,
+                    CURRENT_DATE,
+                    now()
+                )
+                ON CONFLICT (user_id, score_date)
+                DO UPDATE SET
+                    high_risk = daily_security_scores.high_risk + :high,
+                    medium_risk = daily_security_scores.medium_risk + :medium,
+                    low_risk = daily_security_scores.low_risk + :low,
+                    total_scans = daily_security_scores.total_scans + 1
+            """),
+            {
+                "user_id": str(current_user.id),
+                "high": 1 if result["risk"] == "high" else 0,
+                "medium": 1 if result["risk"] == "medium" else 0,
+                "low": 1 if result["risk"] == "low" else 0,
+            },
+        )
+        db.commit()
+    except Exception:
+        logging.exception("❌ Failed to update daily security scores")
+
+    # ---------- TRUSTED + FAMILY ALERTS ----------
     if result["risk"] == "high":
         try:
             notify_trusted_contacts(
@@ -185,8 +235,14 @@ def analyze_input(
                 user_id=str(current_user.id),
                 scan_id=scan_id,
             )
+
+            notify_family_head(
+                db=db,
+                member_user_id=str(current_user.id),
+                scan_id=scan_id,
+            )
         except Exception:
-            logging.exception("⚠️ Trusted alert failed")
+            logging.exception("⚠️ Trusted / family alert failed")
 
     # ---------- RESPONSE ----------
     return AnalyzeResponse(
