@@ -122,7 +122,6 @@ def analyze_input(
             user_plan=user_plan,
         )
 
-        # Normalize AI output
         if result.get("risk") == "dangerous":
             result["risk"] = "high"
 
@@ -181,6 +180,7 @@ def analyze_input(
         )
         db.commit()
     except Exception:
+        db.rollback()
         logging.exception("❌ Failed to save scan history")
 
     # ---------- UPDATE DAILY SECURITY SCORES ----------
@@ -191,6 +191,7 @@ def analyze_input(
                     id,
                     user_id,
                     score,
+                    level,
                     high_risk,
                     medium_risk,
                     low_risk,
@@ -202,6 +203,7 @@ def analyze_input(
                     gen_random_uuid(),
                     :user_id,
                     0,
+                    :level,
                     :high,
                     :medium,
                     :low,
@@ -214,10 +216,12 @@ def analyze_input(
                     high_risk = daily_security_scores.high_risk + :high,
                     medium_risk = daily_security_scores.medium_risk + :medium,
                     low_risk = daily_security_scores.low_risk + :low,
-                    total_scans = daily_security_scores.total_scans + 1
+                    total_scans = daily_security_scores.total_scans + 1,
+                    level = :level
             """),
             {
                 "user_id": str(current_user.id),
+                "level": result["risk"],
                 "high": 1 if result["risk"] == "high" else 0,
                 "medium": 1 if result["risk"] == "medium" else 0,
                 "low": 1 if result["risk"] == "low" else 0,
@@ -225,6 +229,7 @@ def analyze_input(
         )
         db.commit()
     except Exception:
+        db.rollback()
         logging.exception("❌ Failed to update daily security scores")
 
     # ---------- TRUSTED + FAMILY ALERTS ----------
@@ -245,8 +250,5 @@ def analyze_input(
             logging.exception("⚠️ Trusted / family alert failed")
 
     # ---------- RESPONSE ----------
-    return AnalyzeResponse(
-        risk=result["risk"],
-        score=result["score"],
-        reasons=result["reasons"],
-    )
+    return AnalyzeResponse(**result)
+

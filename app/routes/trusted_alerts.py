@@ -5,6 +5,8 @@ from sqlalchemy import text
 from app.db import get_db
 from app.routes.auth import get_current_user
 from app.models.user import User
+from datetime import datetime, timedelta, timezone
+
 
 router = APIRouter(
     prefix="/trusted/alerts",
@@ -19,9 +21,6 @@ def get_trusted_alerts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Fetch alerts where the logged-in user is a TRUSTED CONTACT.
-    """
 
     rows = db.execute(
         text("""
@@ -30,13 +29,10 @@ def get_trusted_alerts(
                 ta.alert_type,
                 ta.read,
                 ta.created_at,
-
                 tc.contact_name,
-
                 u.id AS owner_user_id,
                 u.name AS owner_name,
                 u.email AS owner_email,
-
                 sh.id AS scan_id,
                 sh.risk,
                 sh.score,
@@ -76,10 +72,6 @@ def mark_trusted_alert_read(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Mark a trusted alert as read.
-    Only the intended trusted user can do this.
-    """
 
     updated = db.execute(
         text("""

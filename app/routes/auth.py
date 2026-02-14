@@ -15,30 +15,59 @@ from app.services.audit_logger import create_audit_log
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-SECRET_KEY = "207870f96b3161bb3ed2395d7cb3956910976fc6bf4deb2b4a4ac4a3db63a7d3"
+import os
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY not set in environment")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-RATE_LIMIT = {}
+# ---------------- RATE LIMIT CONFIG ----------------
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 60
 
 
-# ---------------- RATE LIMIT ----------------
-def rate_limit(key: str):
-    now = datetime.utcnow().timestamp()
-    record = RATE_LIMIT.get(key)
+# ---------------- RATE LIMIT (DB-BASED) ----------------
+def rate_limit(key: str, db: Session):
+    now = datetime.now(tz=timezone.utc)
+    window_start = now - timedelta(seconds=WINDOW_SECONDS)
 
-    if not record or now - record["ts"] > WINDOW_SECONDS:
-        RATE_LIMIT[key] = {"count": 1, "ts": now}
-        return
+    # Count attempts inside window
+    count = db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM auth_rate_limits
+            WHERE key = :key
+              AND attempt_time >= :window_start
+        """),
+        {
+            "key": key,
+            "window_start": window_start
+        }
+    ).scalar()
 
-    record["count"] += 1
-    if record["count"] > MAX_ATTEMPTS:
-        raise HTTPException(status_code=429, detail="Too many attempts")
+    if count >= MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many attempts. Please try again later."
+        )
+
+    # Insert new attempt
+    db.execute(
+        text("""
+            INSERT INTO auth_rate_limits (key)
+            VALUES (:key)
+        """),
+        {"key": key}
+    )
+
+    db.commit()
 
 
 # ---------------- PASSWORD / TOKEN ----------------
@@ -105,13 +134,32 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# ---------------- PASSWORD STRENGTH ----------------
+import re
+
+def validate_password_strength(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="Password must include an uppercase letter")
+
+    if not re.search(r"[0-9]", password):
+        raise HTTPException(status_code=400, detail="Password must include a number")
+
+    if not re.search(r"[^\w\s]", password):
+        raise HTTPException(status_code=400, detail="Password must include a special character")
+
+
 # ---------------- ROUTES ----------------
 @router.post("/signup")
 def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)):
-    rate_limit(f"signup:{request.client.host}")
+    rate_limit(f"signup:{request.client.host}", db)
 
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    validate_password_strength(payload.password)
 
     exists = db.query(User).filter(
         (User.email == payload.email) | (User.phone == payload.phone)
@@ -125,7 +173,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         name=payload.name,
         email=payload.email,
         phone=payload.phone,
-        role="USER",          # ✅ FIXED: backend-controlled
+        role="USER",
         plan="FREE",
         password_hash=hash_password(payload.password),
         password_changed_at=now,
@@ -135,7 +183,6 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     db.commit()
     db.refresh(user)
 
-    # 🔗 AUTO-LINK TRUSTED CONTACTS (SAFE)
     if user.email:
         db.execute(
             text("""
@@ -156,7 +203,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
 
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    rate_limit(f"login:{request.client.host}")
+    rate_limit(f"login:{request.client.host}", db)
 
     user = db.query(User).filter(
         (User.email == payload.identifier) | (User.phone == payload.identifier)

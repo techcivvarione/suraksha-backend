@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import logging
@@ -83,7 +83,13 @@ def notify_trusted_contacts(
     ).scalar()
 
     if last_alert_time:
-        if datetime.utcnow() - last_alert_time < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
+        # 🔥 FIX: Normalize timezone safely
+        if last_alert_time.tzinfo is None:
+            last_alert_time = last_alert_time.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+
+        if now - last_alert_time < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
             logger.info("Trusted alert skipped due to cooldown")
             return
 

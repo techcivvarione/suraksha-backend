@@ -24,6 +24,65 @@ OPENPHISH_FILE = FEEDS_DIR / "openphish.txt"
 URLHAUS_FILE = FEEDS_DIR / "urlhaus.txt"
 
 # =========================================================
+# BREACH CATEGORY INTELLIGENCE (NEW - ADDED)
+# =========================================================
+
+BREACH_CATEGORY_MAP = {
+    "Instagram": "Social Media",
+    "Facebook": "Social Media",
+    "Twitter": "Social Media",
+    "LinkedIn": "Professional",
+    "Yahoo": "Email Services",
+    "Gmail": "Email Services",
+    "Adobe": "Tech Platforms",
+    "Dropbox": "Cloud Services",
+    "PayPal": "Finance",
+    "WhatsApp": "Social Media",
+    "Snapchat": "Social Media",
+    "Telegram": "Social Media",
+    "Amazon": "E-commerce",
+    "Flipkart": "E-commerce",
+}
+
+def calculate_category_severity(count: int) -> str:
+    if count >= 5:
+        return "high"
+    if count >= 2:
+        return "medium"
+    return "low"
+
+def build_breach_analysis(sites: list[str]) -> dict:
+    categories = {}
+
+    for site in sites:
+        category = BREACH_CATEGORY_MAP.get(site, "Other")
+
+        if category not in categories:
+            categories[category] = {
+                "count": 0,
+                "sites": []
+            }
+
+        categories[category]["count"] += 1
+        categories[category]["sites"].append(site)
+
+    highest_category = None
+    highest_count = 0
+
+    for category, data in categories.items():
+        data["severity"] = calculate_category_severity(data["count"])
+
+        if data["count"] > highest_count:
+            highest_count = data["count"]
+            highest_category = category
+
+    return {
+        "total_breaches": len(sites),
+        "highest_risk_category": highest_category,
+        "categories": categories
+    }
+
+# =========================================================
 # STATIC DATA
 # =========================================================
 
@@ -185,8 +244,6 @@ def ai_deep_scan(content: str):
             "risk_level": "SUSPICIOUS",
             "confidence": 50,
             "reasons": ["AI analysis unavailable"],
-            "summary": "Heuristic scan completed.",
-            "recommended_action": "Proceed with caution."
         }
 
     client = OpenAI(api_key=api_key)
@@ -198,8 +255,6 @@ Fields:
 - risk_level: SAFE | SUSPICIOUS | DANGEROUS
 - confidence: number 0-100
 - reasons: list of strings
-- summary: short explanation
-- recommended_action: clear action
 
 Content:
 {content}
@@ -224,9 +279,9 @@ Content:
 
 def analyze_input_full(scan_type: str, content: str, user_plan: str):
     scan_type = scan_type.upper()
-    is_paid = user_plan == "PAID"
+    is_paid = user_plan.upper() == "PAID"
 
-    # 1️⃣ THREAT
+    # ===================== THREAT =====================
     if scan_type == "THREAT":
         total_score = 0
         reasons = []
@@ -256,9 +311,9 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
             "reasons": reasons + ai["reasons"]
         }
 
-    # 2️⃣ EMAIL
+    # ===================== EMAIL =====================
     if scan_type == "EMAIL":
-        provider = get_breach_provider()
+        provider = get_breach_provider(user_plan)
         raw = provider.check_email(content)
 
         response = {
@@ -269,24 +324,21 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
         }
 
         if is_paid:
-            response["sites"] = raw.get("sites", [])
+            sites = raw.get("sites", [])
+            response["sites"] = sites
             response["domains"] = raw.get("domains", [])
+            response["breach_analysis"] = build_breach_analysis(sites)
         else:
             response["upgrade"] = {
                 "required": True,
-                "message": "Upgrade to see breached websites and domains",
-                "features": [
-                    "Full breach source list",
-                    "Password exposure details",
-                    "Unlimited scans"
-                ]
+                "message": "Upgrade to see breach category breakdown and exposure analytics",
             }
 
         return response
 
-    # 3️⃣ PASSWORD
+    # ===================== PASSWORD =====================
     if scan_type == "PASSWORD":
-        provider = get_breach_provider()
+        provider = get_breach_provider(user_plan)
         raw = provider.check_password(content)
 
         response = {
@@ -300,10 +352,6 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
             response["upgrade"] = {
                 "required": True,
                 "message": "Upgrade to see password breach details",
-                "features": [
-                    "Breach source visibility",
-                    "Advanced password risk scoring"
-                ]
             }
 
         return response
