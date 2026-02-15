@@ -428,31 +428,32 @@ def cyber_sos_confirm(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # 🔒 One Cyber SOS per month (DB already enforces this)
-    month_start = db.execute(
-        text("SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')")
-    ).scalar()
+    from datetime import datetime
 
-    existing = db.execute(
+    # 🔒 30-Second Protection (Prevents spam clicks)
+    last_sos = db.execute(
         text("""
-            SELECT id
+            SELECT reported_at
             FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
-              AND reported_at >= :start
+            ORDER BY reported_at DESC
+            LIMIT 1
         """),
-        {"uid": str(current_user.id), "start": month_start},
+        {"uid": str(current_user.id)},
     ).first()
 
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "CYBER_SOS_ALREADY_USED",
-                "message": "Cyber SOS can be used only once per month"
-            }
-        )
+    if last_sos:
+        last_time = last_sos[0]
+        if last_time and (datetime.utcnow() - last_time).total_seconds() < 30:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "CYBER_SOS_RATE_LIMIT",
+                    "message": "Please wait 30 seconds before triggering Cyber SOS again"
+                }
+            )
 
-    # 🧾 Insert confirmed scam
+    # 🧾 Insert confirmed scam (NO monthly restriction anymore)
     report = ScamReport(
         user_id=current_user.id,
         scam_type=payload.scam_type,
@@ -468,9 +469,7 @@ def cyber_sos_confirm(
     db.commit()
     db.refresh(report)
 
-    # 🧮 Cyber Card penalty handled automatically by monthly job
-
-    # 📝 Generate complaint text (copy-ready)
+    # 📝 Generate complaint text
     complaint_text = generate_cyber_complaint_text(
         user=current_user,
         scam_type=payload.scam_type,
@@ -480,7 +479,7 @@ def cyber_sos_confirm(
         source=payload.source,
     )
 
-    # 🧾 Audit
+    # 🧾 Audit log (unchanged)
     create_audit_log(
         db=db,
         user_id=current_user.id,
@@ -503,3 +502,4 @@ def cyber_sos_confirm(
             "Change passwords & secure affected accounts"
         ]
     }
+
