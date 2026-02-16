@@ -471,13 +471,15 @@ def cyber_sos_confirm(
 
     # 📝 Generate complaint text
     complaint_text = generate_cyber_complaint_text(
-        user=current_user,
-        scam_type=payload.scam_type,
-        incident_date=payload.incident_date,
-        description=payload.description,
-        loss_amount=payload.loss_amount,
-        source=payload.source,
-    )
+    user_name=current_user.name,
+    phone=current_user.phone or "Not provided",
+    email=current_user.email,
+    scam_type=payload.scam_type,
+    incident_date=payload.incident_date,
+    loss_amount=payload.loss_amount,
+    description=payload.description,
+)
+
 
     # 🧾 Audit log (unchanged)
     create_audit_log(
