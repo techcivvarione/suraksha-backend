@@ -94,6 +94,8 @@ from app.routes import trusted_alerts
 from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
 from app.routes.cyber_card_history import router as cyber_card_history_router
+from app.routes.ai_image_router import router as ai_image_router
+
 
 
 
@@ -127,7 +129,7 @@ app.include_router(trusted_alerts.router)
 app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
 app.include_router(cyber_card_history_router)
-
+app.include_router(ai_image_router)
 
 
 # -------------------------------------------------
@@ -141,3 +143,11 @@ def health_check():
         "service": "go-suraksha-backend",
         "version": "1.0.0",
     }
+
+@app.on_event("startup")
+def show_routes():
+    print("\n=== REGISTERED ROUTES ===")
+    for route in app.routes:
+        print(route.path)
+    print("=========================\n")
+
