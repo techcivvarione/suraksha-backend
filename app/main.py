@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pathlib import Path
 import logging
+import os
+
 
 # -------------------------------------------------
 # ENV & LOGGING
@@ -11,6 +13,10 @@ import logging
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+
+print("========== DB DEBUG ==========")
+print("DATABASE_URL:", os.getenv("DATABASE_URL"))
+print("================================")
 
 logging.basicConfig(
     level=logging.INFO,
