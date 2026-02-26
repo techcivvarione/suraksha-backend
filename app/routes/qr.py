@@ -148,14 +148,18 @@ def analyze_upi_qr(
         db.rollback()
         raise
     except Exception as exc:
-        db.rollback()
-        logger.exception(
-            "QR analyze failed: user_id=%s qr_hash=%s error=%s",
-            user_id,
-            payload.qr_hash,
-            str(exc),
-        )
-        raise HTTPException(status_code=500, detail="Unable to analyze QR code.")
+        import traceback
+    traceback.print_exc()
+
+    logger.exception(
+        f"QR analyze crashed: user_id={current_user.id} "
+        f"qr_hash={request.qr_hash}"
+    )
+
+    db.rollback()
+
+    # TEMPORARY DEBUG MODE – expose real error
+    raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/pro/report", response_model=QrReportResponse)
