@@ -8,7 +8,8 @@ import os
 import json
 from openai import OpenAI
 
-from app.services.breach.manager import get_breach_provider
+from app.core.features import Feature, has_feature
+from app.services.breach.manager import check_email_breach, get_breach_provider
 
 # =========================================================
 # CONFIG
@@ -279,7 +280,12 @@ Content:
 
 def analyze_input_full(scan_type: str, content: str, user_plan: str):
     scan_type = scan_type.upper()
-    is_paid = user_plan.upper() == "PAID"
+    class _PlanUser:
+        def __init__(self, plan_value: str):
+            self.plan = plan_value
+
+    user_ctx = _PlanUser(user_plan)
+    has_email_details = has_feature(user_ctx, Feature.EMAIL_BREACH_DETAILS)
 
     # ===================== THREAT =====================
     if scan_type == "THREAT":
@@ -313,8 +319,7 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
 
     # ===================== EMAIL =====================
     if scan_type == "EMAIL":
-        provider = get_breach_provider(user_plan)
-        raw = provider.check_email(content)
+        raw = check_email_breach(content, user_plan)
 
         response = {
             "risk": raw["risk"],
@@ -323,10 +328,12 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
             "reasons": raw["reasons"]
         }
 
-        if is_paid:
-            sites = raw.get("sites", [])
+        if has_email_details:
+            breaches = raw.get("breaches", [])
+            sites = [b.get("name") for b in breaches if b.get("name")]
             response["sites"] = sites
-            response["domains"] = raw.get("domains", [])
+            response["breaches"] = breaches
+            response["domains"] = [b.get("domain") for b in breaches if b.get("domain")]
             response["breach_analysis"] = build_breach_analysis(sites)
         else:
             response["upgrade"] = {

@@ -1,15 +1,10 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from dotenv import load_dotenv
-from pathlib import Path
 import logging
 import os
+from pathlib import Path
 
-
-# -------------------------------------------------
-# ENV & LOGGING
-# -------------------------------------------------
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -25,54 +20,45 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# -------------------------------------------------
-# APP INIT
-# -------------------------------------------------
-
 app = FastAPI(
     title="GO Suraksha API",
     version="1.0.0",
 )
 
-# -------------------------------------------------
-# GLOBAL SECURITY MIDDLEWARE (FIRST)
-# -------------------------------------------------
-
 from app.middleware.security import SecurityLoggingMiddleware
 app.add_middleware(SecurityLoggingMiddleware)
 
-# -------------------------------------------------
-# CORS (OPEN FOR NOW — LOCK LATER)
-# -------------------------------------------------
+configured_origins = os.getenv("CORS_ORIGINS", "").strip()
+if configured_origins:
+    allow_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+else:
+    allow_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict in prod
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------------------------------
-# SAFE STARTUP HOOK (NEVER BLOCK APP)
-# -------------------------------------------------
 
 @app.on_event("startup")
 def startup():
-    logger.info("🚀 GO Suraksha API starting up")
+    logger.info("GO Suraksha API starting up")
 
     try:
         from app.services.news_ingestor import ingest_rss
         ingest_rss()
-        logger.info("📰 RSS ingestion completed")
-    except Exception as e:
-        logger.error(f"RSS ingestion skipped: {e}")
+        logger.info("RSS ingestion completed")
+    except Exception as exc:
+        logger.error("RSS ingestion skipped: %s", exc)
 
-    logger.info("✅ Startup completed")
+    logger.info("Startup completed")
 
-# -------------------------------------------------
-# ROUTES
-# -------------------------------------------------
 
 from app.routes.auth import router as auth_router
 from app.routes.profile import router as profile_router
@@ -99,16 +85,10 @@ from app.routes.family import router as family_router
 from app.routes import trusted_alerts
 from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
-from app.routes.cyber_card_history import router as cyber_card_history_router
 from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr import router as qr_router
+from app.routes.webhooks import router as webhooks_router
 
-
-
-
-# -------------------------------------------------
-# REGISTER ROUTERS
-# -------------------------------------------------
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -135,14 +115,10 @@ app.include_router(family_router)
 app.include_router(trusted_alerts.router)
 app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
-app.include_router(cyber_card_history_router)
 app.include_router(ai_image_router)
 app.include_router(qr_router)
+app.include_router(webhooks_router)
 
-
-# -------------------------------------------------
-# HEALTH CHECK
-# -------------------------------------------------
 
 @app.get("/health")
 def health_check():
@@ -152,10 +128,10 @@ def health_check():
         "version": "1.0.0",
     }
 
+
 @app.on_event("startup")
 def show_routes():
     print("\n=== REGISTERED ROUTES ===")
     for route in app.routes:
         print(route.path)
     print("=========================\n")
-

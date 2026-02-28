@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -8,18 +8,23 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.user import User
 from app.routes.auth import get_current_user, hash_password, verify_password
+from app.services.language import ALLOWED_LANGUAGES, normalize_language
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
 
 # ---------- models ----------
 class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
-    role: Optional[str] = None
     phone: Optional[str] = None
+    preferred_language: Optional[str] = None
 
 
 class PasswordUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     current_password: str
     new_password: str
     confirm_new_password: str
@@ -34,6 +39,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "phone": current_user.phone,
         "role": current_user.role,
+        "preferred_language": current_user.preferred_language,
         "created_at": current_user.created_at,
         "updated_at": current_user.updated_at,
     }
@@ -48,11 +54,14 @@ def update_profile(
     if payload.name is not None:
         current_user.name = payload.name
 
-    if payload.role is not None:
-        current_user.role = payload.role
-
     if payload.phone is not None:
         current_user.phone = payload.phone
+
+    if payload.preferred_language is not None:
+        normalized = normalize_language(payload.preferred_language, supported=ALLOWED_LANGUAGES)
+        if not normalized:
+            raise HTTPException(status_code=400, detail="preferred_language must be one of: en, hi, te")
+        current_user.preferred_language = normalized
 
     current_user.updated_at = datetime.utcnow()
 

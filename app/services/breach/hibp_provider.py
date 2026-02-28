@@ -1,8 +1,9 @@
 import hashlib
 import os
-import requests
-from typing import Optional
 
+import requests
+
+from app.core.features import Feature, has_feature
 from app.services.breach.base import BreachProvider
 
 HIBP_EMAIL_API = "https://haveibeenpwned.com/api/v3/breachedaccount"
@@ -11,8 +12,8 @@ HIBP_PASSWORD_API = "https://api.pwnedpasswords.com/range"
 
 class HIBPProvider(BreachProvider):
     """
-    Have I Been Pwned provider
-    Access control (FREE vs PAID) is enforced HERE only.
+    Have I Been Pwned provider.
+    Access control is enforced here before serialization.
     """
 
     def __init__(self, user_plan: str = "FREE"):
@@ -21,15 +22,13 @@ class HIBPProvider(BreachProvider):
             raise RuntimeError("HIBP_API_KEY not set")
 
         self.user_plan = user_plan.upper()
+        self._user_ctx = type("PlanCtx", (), {"plan": self.user_plan})()
 
         self.headers = {
             "hibp-api-key": self.api_key,
             "user-agent": "GO-SURAKSHA",
         }
 
-    # ==================================================
-    # EMAIL BREACH CHECK (LIVE)
-    # ==================================================
     def check_email(self, email: str) -> dict:
         url = f"{HIBP_EMAIL_API}/{email}"
 
@@ -39,7 +38,6 @@ class HIBPProvider(BreachProvider):
             timeout=8,
         )
 
-        # ---------- NO BREACH ----------
         if resp.status_code == 404:
             return {
                 "breached": False,
@@ -49,7 +47,6 @@ class HIBPProvider(BreachProvider):
                 "reasons": ["No known data breaches found for this email"],
             }
 
-        # ---------- RATE LIMITED ----------
         if resp.status_code == 429:
             return {
                 "breached": False,
@@ -65,32 +62,27 @@ class HIBPProvider(BreachProvider):
         breaches = resp.json()
         count = len(breaches)
 
-        # Extract details (PAID only)
-        sites = [b["Name"] for b in breaches]
-        domains = [b.get("Domain") for b in breaches if b.get("Domain")]
-
         response = {
             "breached": True,
             "risk": "high",
             "score": min(100, 40 + count * 10),
             "count": count,
-            "reasons": [
-                f"Email appeared in {count} known data breaches"
-            ],
+            "reasons": [f"Email appeared in {count} known data breaches"],
         }
 
-        # 🔐 ACCESS CONTROL
-        if self.user_plan == "PAID":
-            response.update({
-                "sites": sites,
-                "domains": domains,
-            })
+        if has_feature(self._user_ctx, Feature.EMAIL_BREACH_DETAILS):
+            response["breaches"] = [
+                {
+                    "name": breach.get("Name"),
+                    "domain": breach.get("Domain"),
+                    "breach_date": breach.get("BreachDate"),
+                    "data_classes": breach.get("DataClasses", []),
+                }
+                for breach in breaches
+            ]
 
         return response
 
-    # ==================================================
-    # PASSWORD BREACH CHECK (LIVE, K-ANONYMITY)
-    # ==================================================
     def check_password(self, password: str) -> dict:
         sha1 = hashlib.sha1(password.encode()).hexdigest().upper()
         prefix, suffix = sha1[:5], sha1[5:]
@@ -112,9 +104,7 @@ class HIBPProvider(BreachProvider):
                     "risk": "high",
                     "score": 90,
                     "count": int(count),
-                    "reasons": [
-                        f"Password found in breaches ({count} times)"
-                    ],
+                    "reasons": [f"Password found in breaches ({count} times)"],
                 }
 
         return {

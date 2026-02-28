@@ -5,8 +5,9 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from app.core.features import Feature
 from app.db import get_db
-from app.routes.auth import get_current_user
+from app.dependencies.access import require_feature
 from app.models.user import User
 from app.services.ocr_service import extract_text_from_image, OCRException
 from app.services.analyzer import analyze_input_full
@@ -18,26 +19,10 @@ router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 def analyze_ocr(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_feature(Feature.OCR_SCAN)
+    ),
 ):
-    # ---------- PLAN CHECK ----------
-    if current_user.plan != "PAID":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "UPGRADE_REQUIRED",
-                "message": "OCR scan is available for paid users only",
-                "upgrade": {
-                    "required": True,
-                    "features": [
-                        "OCR scam detection",
-                        "Screenshot analysis",
-                        "Higher scan limits"
-                    ]
-                }
-            }
-        )
-
     # ---------- FILE VALIDATION ----------
     if not file.content_type.startswith("image/"):
         raise HTTPException(

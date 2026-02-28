@@ -1,11 +1,15 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
 from typing import List
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from redis.exceptions import RedisError
+
+from app.core.features import Limit, get_global_limit
+from app.services.redis_store import allow_sliding_window
 
 router = APIRouter(prefix="/ai", tags=["AI Insights"])
 
 
-# ---------- models ----------
 class InsightRequest(BaseModel):
     input_text: str
     analysis_result: dict
@@ -19,16 +23,38 @@ class InsightResponse(BaseModel):
     what_to_do: List[str]
 
 
-# ---------- core logic ----------
+def _enforce_rate_limit(client_ip: str):
+    window_seconds = get_global_limit(Limit.AI_INSIGHT_RATE_WINDOW_SECONDS)
+    max_requests = get_global_limit(Limit.AI_INSIGHT_RATE_LIMIT_IP)
+    try:
+        allowed = allow_sliding_window(
+            "rate:ai_insight:ip",
+            max_requests,
+            window_seconds,
+            client_ip or "unknown",
+        )
+    except RedisError:
+        raise HTTPException(status_code=503, detail="Rate limiter unavailable")
+
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "RATE_LIMIT",
+                "message": "Too many AI insight requests. Try again later.",
+            },
+        )
+
+
 def derive_scam_type(text: str) -> str:
-    t = text.lower()
-    if "otp" in t or "bank" in t or "upi" in t:
+    lowered = text.lower()
+    if "otp" in lowered or "bank" in lowered or "upi" in lowered:
         return "Banking / UPI Scam"
-    if "job" in t or "offer" in t:
+    if "job" in lowered or "offer" in lowered:
         return "Job Scam"
-    if "crypto" in t or "investment" in t:
+    if "crypto" in lowered or "investment" in lowered:
         return "Investment Scam"
-    if "delivery" in t or "courier" in t:
+    if "delivery" in lowered or "courier" in lowered:
         return "Courier Scam"
     return "General Scam"
 
@@ -75,9 +101,11 @@ def actions_for(scam_type: str) -> List[str]:
     return mapping.get(scam_type, [])
 
 
-# ---------- route ----------
 @router.post("/insight", response_model=InsightResponse)
-def generate_insight(payload: InsightRequest):
+def generate_insight(payload: InsightRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    _enforce_rate_limit(client_ip)
+
     scam_type = derive_scam_type(payload.input_text)
     risk_level = payload.analysis_result.get("risk_level", "Unknown")
 

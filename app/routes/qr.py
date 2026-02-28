@@ -1,16 +1,17 @@
 import logging
-from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import case, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.features import Feature, has_feature, normalize_plan
 from app.db import get_db
 from app.models.qr_models import QrReport, QrReputation, QrScanLog
 from app.models.user import User
 from app.routes.auth import get_current_user
+from app.services.plan_limits import LimitType, enforce_limit
 from app.schemas.qr_schemas import (
     QrAnalyzeRequest,
     QrAnalyzeResponse,
@@ -22,31 +23,6 @@ router = APIRouter(prefix="/qr", tags=["QR"])
 logger = logging.getLogger(__name__)
 
 SCAM_FLAG_THRESHOLD = 5
-FREE_WEEKLY_SCAN_LIMIT = 3
-FREE_WEEKLY_REPORT_LIMIT = 3
-
-# FUTURE-PROOF tier constants - handles all variations
-TIER_FREE = "GO_FREE"
-TIER_PRO = "GO_PRO"
-TIER_ULTRA = "GO_ULTRA"
-
-# Tier aliases - maps common variations to standard tiers
-TIER_ALIASES = {
-    "FREE": TIER_FREE,
-    "GO FREE": TIER_FREE,
-    "GO_FREE": TIER_FREE,
-    "GOFREE": TIER_FREE,
-    "PRO": TIER_PRO,
-    "GO PRO": TIER_PRO,
-    "GO_PRO": TIER_PRO,
-    "GOPRO": TIER_PRO,
-    "PREMIUM": TIER_PRO,
-    "ULTRA": TIER_ULTRA,
-    "GO ULTRA": TIER_ULTRA,
-    "GO_ULTRA": TIER_ULTRA,
-    "GOULTRA": TIER_ULTRA,
-    "ENTERPRISE": TIER_ULTRA,
-}
 
 BUSINESS_KEYWORDS = (
     "store",
@@ -76,9 +52,8 @@ def _get_subscription_tier(current_user: User) -> str:
     Get normalized subscription tier with future-proof fallbacks.
     
     Checks multiple possible column names and normalizes tier values.
-    Returns one of: GO_FREE, GO_PRO, GO_ULTRA
+    Returns one of normalized plan aliases from app.core.features.
     """
-    # Try multiple possible column names
     tier = None
     
     # Primary: subscription_tier
@@ -100,39 +75,21 @@ def _get_subscription_tier(current_user: User) -> str:
     if not tier:
         tier = getattr(current_user, "subscription_status", None)
     
-    # Default to FREE if nothing found
     if not tier:
         logger.warning(
             f"No subscription tier found for user {current_user.id}, defaulting to FREE"
         )
-        return TIER_FREE
-    
-    # Normalize the tier value
-    normalized = str(tier).strip().upper()
-    
-    # Check if it's already a valid tier
-    if normalized in {TIER_FREE, TIER_PRO, TIER_ULTRA}:
-        logger.info(f"User {current_user.id} tier: {normalized}")
-        return normalized
-    
-    # Check aliases
-    if normalized in TIER_ALIASES:
-        resolved_tier = TIER_ALIASES[normalized]
-        logger.info(
-            f"User {current_user.id} tier resolved: {normalized} -> {resolved_tier}"
-        )
-        return resolved_tier
-    
-    # Unknown tier - default to FREE and log warning
-    logger.warning(
-        f"Unknown subscription tier '{tier}' for user {current_user.id}, defaulting to FREE"
-    )
-    return TIER_FREE
+        return normalize_plan(None)
+
+    normalized = normalize_plan(str(tier))
+    logger.info(f"User {current_user.id} tier resolved: {tier} -> {normalized}")
+    return normalized
 
 
 def _is_premium_user(subscription_tier: str) -> bool:
-    """Check if user has premium access (PRO or ULTRA)."""
-    return subscription_tier in {TIER_PRO, TIER_ULTRA}
+    """Check if user has unlimited QR access."""
+    tier_ctx = type("TierCtx", (), {"plan": subscription_tier})()
+    return has_feature(tier_ctx, Feature.QR_UNLIMITED)
 
 
 def _get_reputation_snapshot(db: Session, qr_hash: str) -> tuple[int, bool]:
@@ -149,6 +106,7 @@ def _get_reputation_snapshot(db: Session, qr_hash: str) -> tuple[int, bool]:
 
 @router.post("/pro/upi/analyze", response_model=QrAnalyzeResponse)
 def analyze_upi_qr(
+    request: Request,
     payload: QrAnalyzeRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db, use_cache=False),
@@ -156,7 +114,7 @@ def analyze_upi_qr(
     """
     Analyze a UPI QR code for scam signals.
     
-    Free tier: 3 scans per week
+    Free tier: Limited scans
     Pro/Ultra: Unlimited scans
     """
     user_id = current_user.id
@@ -178,25 +136,13 @@ def analyze_upi_qr(
                 select(User.id).where(User.id == user_id).with_for_update()
             ).scalar_one()
 
-            # Check rate limits for free users only
-            if not is_premium:
-                week_ago = datetime.utcnow() - timedelta(days=7)
-                weekly_scan_count = db.query(QrScanLog).filter(
-                    QrScanLog.user_id == user_id,
-                    QrScanLog.created_at >= week_ago
-                ).count()
-                
-                if weekly_scan_count >= FREE_WEEKLY_SCAN_LIMIT:
-                    logger.warning(
-                        "QR analyze weekly limit reached: user_id=%s tier=%s scans_last_7_days=%s",
-                        user_id,
-                        subscription_tier,
-                        weekly_scan_count,
-                    )
-                    raise HTTPException(
-                        status_code=403, 
-                        detail="Weekly QR scan limit reached. Upgrade to GO PRO for unlimited scans."
-                    )
+            # Enforce plan limits via centralized limiter.
+            enforce_limit(
+                current_user,
+                LimitType.QR_WEEKLY,
+                db=db,
+                endpoint=request.url.path,
+            )
 
             # Upsert QR reputation record
             db.execute(
@@ -262,6 +208,7 @@ def analyze_upi_qr(
 
 @router.post("/pro/report", response_model=QrReportResponse)
 def report_qr(
+    request: Request,
     payload: QrReportRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db, use_cache=False),
@@ -269,7 +216,7 @@ def report_qr(
     """
     Report a QR code as suspicious/scam.
     
-    Free tier: 3 reports per week
+    Free tier: Limited reports
     Pro/Ultra: Unlimited reports
     """
     user_id = current_user.id
@@ -311,25 +258,13 @@ def report_qr(
                     is_flagged=is_flagged,
                 )
 
-            # Check rate limits for free users only
-            if not is_premium:
-                week_ago = datetime.utcnow() - timedelta(days=7)
-                weekly_report_count = db.query(QrReport).filter(
-                    QrReport.user_id == user_id,
-                    QrReport.created_at >= week_ago
-                ).count()
-                
-                if weekly_report_count >= FREE_WEEKLY_REPORT_LIMIT:
-                    logger.warning(
-                        "QR report weekly limit reached: user_id=%s tier=%s reports_last_7_days=%s",
-                        user_id,
-                        subscription_tier,
-                        weekly_report_count,
-                    )
-                    raise HTTPException(
-                        status_code=403, 
-                        detail="Weekly QR report limit reached. Upgrade to GO PRO for unlimited reports."
-                    )
+            # Enforce plan limits via centralized limiter.
+            enforce_limit(
+                current_user,
+                LimitType.QR_WEEKLY,
+                db=db,
+                endpoint=request.url.path,
+            )
 
             # Create report
             db.add(

@@ -1,96 +1,125 @@
-from fastapi import APIRouter, Request, Depends, HTTPException
 import json
 import logging
 import uuid
-from datetime import date
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 
+from email_validator import EmailNotValidError, validate_email
+from fastapi import APIRouter, Depends, HTTPException, Request
+from redis.exceptions import RedisError
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.core.features import (
+    Limit,
+    get_global_limit,
+)
 from app.db import get_db
 from app.models.analyze import AnalyzeRequest, AnalyzeResponse
-from app.routes.auth import get_current_user
 from app.models.user import User
-from app.services.trusted_alerts import notify_trusted_contacts
+from app.routes.auth import get_current_user
 from app.services.family_alerts import notify_family_head
-
+from app.services.plan_limits import LimitType, enforce_limit
+from app.services.redis_store import allow_sliding_window, acquire_cooldown
+from app.services.trusted_alerts import notify_trusted_contacts
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
-# =========================================================
-# PLAN-BASED RATE LIMITS (DAILY)
-# =========================================================
 
-PLAN_LIMITS = {
-    "FREE": {
-        "THREAT": 10,
-        "EMAIL": 3,
-        "PASSWORD": 3,
-    },
-    "PAID": {
-        "THREAT": 100,
-        "EMAIL": 20,
-        "PASSWORD": 20,
-    },
-}
-
-# In-memory (safe for now, Redis later)
-USAGE_COUNTER = {}
-
-# =========================================================
-# RATE LIMIT HELPERS
-# =========================================================
-
-def rate_limit_error(plan: str, scan_type: str, limit: int):
-    payload = {
-        "error": "RATE_LIMIT",
-        "scan_type": scan_type,
-        "message": f"You’ve reached today’s {scan_type.title()} scan limit",
-        "limit": limit,
-        "plan": plan,
-    }
-
-    if plan == "FREE":
-        payload["upgrade"] = {
-            "required": True,
-            "message": "Upgrade to continue scanning",
-            "benefits": [
-                "Higher daily scan limits",
-                "Full breach source visibility",
-                "OCR scam detection",
-                "Trusted family alerts",
-            ],
-        }
-
-    raise HTTPException(status_code=429, detail=payload)
+def validation_error(code: str, message: str, status_code: int = 400):
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "code": code,
+                "message": message,
+            }
+        },
+    )
 
 
-def enforce_rate_limit(user_id: str, plan: str, scan_type: str):
-    today = date.today()
-    plan = plan.upper()
-    scan_type = scan_type.upper()
+def normalize_email_input(raw_email: str) -> str:
+    value = (raw_email or "").strip()
+    if not value:
+        validation_error("EMAIL_REQUIRED", "Email is required")
 
-    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])
-    max_allowed = limits.get(scan_type)
+    max_length = get_global_limit(Limit.EMAIL_MAX_LENGTH)
+    if len(value) > max_length:
+        validation_error("EMAIL_TOO_LONG", f"Email must be <= {max_length} characters")
 
-    if max_allowed is None:
-        return
+    try:
+        parsed = validate_email(value, check_deliverability=False)
+    except EmailNotValidError:
+        validation_error("INVALID_EMAIL", "Invalid email format")
 
-    key = f"{user_id}:{scan_type}"
-    record = USAGE_COUNTER.get(key)
-
-    if not record or record["date"] != today:
-        USAGE_COUNTER[key] = {"date": today, "count": 1}
-        return
-
-    if record["count"] >= max_allowed:
-        rate_limit_error(plan, scan_type, max_allowed)
-
-    record["count"] += 1
+    return parsed.email.lower()
 
 
-# =========================================================
-# ROUTE
-# =========================================================
+def enforce_email_guardrails(
+    user_id: str,
+    client_ip: str,
+    normalized_email: str,
+):
+    cooldown_seconds = get_global_limit(Limit.EMAIL_GLOBAL_COOLDOWN_SECONDS)
+    duplicate_seconds = get_global_limit(Limit.EMAIL_DUPLICATE_SCAN_BLOCK_SECONDS)
+    rate_window = get_global_limit(Limit.EMAIL_RATE_WINDOW_SECONDS)
+    user_limit = get_global_limit(Limit.EMAIL_RATE_LIMIT_USER)
+    ip_limit = get_global_limit(Limit.EMAIL_RATE_LIMIT_IP)
+
+    try:
+        global_ok = acquire_cooldown(
+            "cooldown:email:global",
+            cooldown_seconds,
+            normalized_email,
+        )
+        if not global_ok:
+            validation_error(
+                "EMAIL_COOLDOWN",
+                "Please wait before scanning this email again",
+                status_code=429,
+            )
+
+        dedupe_ok = acquire_cooldown(
+            "cooldown:email:user",
+            duplicate_seconds,
+            user_id,
+            normalized_email,
+        )
+        if not dedupe_ok:
+            validation_error(
+                "EMAIL_DUPLICATE_SCAN",
+                "This email was scanned recently. Please try again shortly.",
+                status_code=429,
+            )
+
+        user_rate_ok = allow_sliding_window(
+            "rate:email:user",
+            user_limit,
+            rate_window,
+            user_id,
+        )
+        if not user_rate_ok:
+            validation_error(
+                "EMAIL_RATE_LIMIT",
+                "Too many email scans. Please try again later.",
+                status_code=429,
+            )
+
+        ip_rate_ok = allow_sliding_window(
+            "rate:email:ip",
+            ip_limit,
+            rate_window,
+            client_ip or "unknown",
+        )
+        if not ip_rate_ok:
+            validation_error(
+                "EMAIL_RATE_LIMIT",
+                "Too many email scans. Please try again later.",
+                status_code=429,
+            )
+
+    except RedisError:
+        logging.exception("Redis email guardrails failed")
+        raise HTTPException(status_code=503, detail="Rate limiter unavailable")
+
 
 @router.post("/", response_model=AnalyzeResponse)
 def analyze_input(
@@ -105,20 +134,37 @@ def analyze_input(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     scan_type = request_data.type.upper()
-    user_plan = (current_user.plan or "FREE").upper()
+    user_plan = (current_user.plan or "GO_FREE").upper()
+    client_ip = request.client.host if request.client else "unknown"
 
-    # ---------- RATE LIMIT ----------
-    enforce_rate_limit(
-        user_id=str(current_user.id),
-        plan=user_plan,
-        scan_type=scan_type,
-    )
+    if scan_type == "EMAIL":
+        normalized_email = normalize_email_input(request_data.content)
+        enforce_email_guardrails(
+            user_id=str(current_user.id),
+            client_ip=client_ip,
+            normalized_email=normalized_email,
+        )
+        content_to_scan = normalized_email
+    else:
+        content_to_scan = request_data.content
 
-    # ---------- ANALYZE ----------
+    scan_limit_type = {
+        "THREAT": LimitType.THREAT_DAILY,
+        "EMAIL": LimitType.EMAIL_MONTHLY,
+        "PASSWORD": LimitType.PASSWORD_MONTHLY,
+    }.get(scan_type)
+    if scan_limit_type:
+        enforce_limit(
+            current_user,
+            scan_limit_type,
+            db=db,
+            endpoint=request.url.path,
+        )
+
     try:
         result = analyze_input_full(
             scan_type=scan_type,
-            content=request_data.content,
+            content=content_to_scan,
             user_plan=user_plan,
         )
 
@@ -131,7 +177,6 @@ def analyze_input(
         logging.exception("Analyze failed")
         raise HTTPException(status_code=400, detail="Analyze failed")
 
-    # ---------- HISTORY REDACTION ----------
     if scan_type == "THREAT":
         stored_input = request_data.content
     elif scan_type == "EMAIL":
@@ -141,12 +186,12 @@ def analyze_input(
     else:
         stored_input = "REDACTED"
 
-    # ---------- SAVE SCAN HISTORY ----------
     scan_id = str(uuid.uuid4())
 
     try:
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO scan_history (
                     id,
                     user_id,
@@ -167,7 +212,8 @@ def analyze_input(
                     :scan_type,
                     now()
                 )
-            """),
+            """
+            ),
             {
                 "id": scan_id,
                 "user_id": str(current_user.id),
@@ -181,12 +227,12 @@ def analyze_input(
         db.commit()
     except Exception:
         db.rollback()
-        logging.exception("❌ Failed to save scan history")
+        logging.exception("Failed to save scan history")
 
-    # ---------- UPDATE DAILY SECURITY SCORES ----------
     try:
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO daily_security_scores (
                     id,
                     user_id,
@@ -218,7 +264,8 @@ def analyze_input(
                     low_risk = daily_security_scores.low_risk + :low,
                     total_scans = daily_security_scores.total_scans + 1,
                     level = :level
-            """),
+            """
+            ),
             {
                 "user_id": str(current_user.id),
                 "level": result["risk"],
@@ -230,9 +277,8 @@ def analyze_input(
         db.commit()
     except Exception:
         db.rollback()
-        logging.exception("❌ Failed to update daily security scores")
+        logging.exception("Failed to update daily security scores")
 
-    # ---------- TRUSTED + FAMILY ALERTS ----------
     if result["risk"] == "high":
         try:
             notify_trusted_contacts(
@@ -247,8 +293,6 @@ def analyze_input(
                 scan_id=scan_id,
             )
         except Exception:
-            logging.exception("⚠️ Trusted / family alert failed")
+            logging.exception("Trusted / family alert failed")
 
-    # ---------- RESPONSE ----------
     return AnalyzeResponse(**result)
-

@@ -1,17 +1,20 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
+import hashlib
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db import get_db
+from app.core.features import TIER_FREE
 from app.models.user import User
 from app.services.audit_logger import create_audit_log
+from app.services.subscription import maybe_auto_downgrade_expired_subscription
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -26,6 +29,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # ---------------- RATE LIMIT CONFIG ----------------
@@ -35,6 +39,8 @@ WINDOW_SECONDS = 60
 
 # ---------------- RATE LIMIT (DB-BASED) ----------------
 def rate_limit(key: str, db: Session):
+    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    namespaced_key = f"gosuraksha:rate:auth:{key_hash}"
     now = datetime.now(tz=timezone.utc)
     window_start = now - timedelta(seconds=WINDOW_SECONDS)
 
@@ -47,7 +53,7 @@ def rate_limit(key: str, db: Session):
               AND attempt_time >= :window_start
         """),
         {
-            "key": key,
+            "key": namespaced_key,
             "window_start": window_start
         }
     ).scalar()
@@ -64,7 +70,7 @@ def rate_limit(key: str, db: Session):
             INSERT INTO auth_rate_limits (key)
             VALUES (:key)
         """),
-        {"key": key}
+        {"key": namespaced_key}
     )
 
     db.commit()
@@ -91,9 +97,32 @@ def create_access_token(subject: str):
 
 # ---------------- AUTH DEPENDENCY ----------------
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ):
+    return _resolve_current_user(request=request, credentials=credentials, db=db, required=True)
+
+
+def get_current_user_optional(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+    db: Session = Depends(get_db),
+):
+    return _resolve_current_user(request=request, credentials=credentials, db=db, required=False)
+
+
+def _resolve_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials],
+    db: Session,
+    required: bool,
+):
+    if credentials is None:
+        if required:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return None
+
     try:
         token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -114,14 +143,19 @@ def get_current_user(
             if issued_at < pwd_changed:
                 raise HTTPException(status_code=401, detail="Session expired")
 
+        user = maybe_auto_downgrade_expired_subscription(db=db, user=user, request=request)
         return user
 
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        if required:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return None
 
 
 # ---------------- REQUEST MODELS ----------------
 class SignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     email: Optional[str]
     phone: Optional[str]
@@ -130,6 +164,8 @@ class SignupRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     identifier: str
     password: str
 
@@ -174,7 +210,9 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         email=payload.email,
         phone=payload.phone,
         role="USER",
-        plan="FREE",
+        plan=TIER_FREE,
+        subscription_status="ACTIVE",
+        subscription_expires_at=None,
         password_hash=hash_password(payload.password),
         password_changed_at=now,
     )
@@ -241,4 +279,6 @@ def me(current_user: User = Depends(get_current_user)):
         "phone": current_user.phone,
         "role": current_user.role,
         "plan": current_user.plan,
+        "subscription_status": current_user.subscription_status,
+        "subscription_expires_at": current_user.subscription_expires_at,
     }

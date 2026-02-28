@@ -10,6 +10,7 @@ def create_audit_log(
     event_description: str,
     request: Request | None = None,
     user_id=None,
+    auto_commit: bool = True,
 ):
     ip_address = None
     user_agent = None
@@ -28,4 +29,5 @@ def create_audit_log(
     )
 
     db.add(log)
-    db.commit()
+    if auto_commit:
+        db.commit()

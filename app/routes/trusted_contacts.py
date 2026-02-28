@@ -1,41 +1,27 @@
+import uuid
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import Session
 from sqlalchemy import text
-from uuid import UUID
-import uuid
+from sqlalchemy.orm import Session
 
+from app.core.features import Feature, get_feature_limit
 from app.db import get_db
-from app.routes.auth import get_current_user
 from app.models.user import User
+from app.routes.auth import get_current_user
 
 router = APIRouter(
     prefix="/trusted-contacts",
     tags=["Trusted Contacts"],
 )
 
-# ---------------- MODELS ----------------
 
 class TrustedContactCreate(BaseModel):
     contact_name: str
     contact_email: EmailStr | None = None
     contact_phone: str | None = None
 
-
-# ---------------- HELPERS ----------------
-
-PLAN_LIMITS = {
-    "FREE": 1,
-    "FAMILY_BASIC": 3,
-    "FAMILY_PRO": 6,
-}
-
-
-def get_contact_limit(plan: str) -> int:
-    return PLAN_LIMITS.get(plan.upper(), 1)
-
-
-# ---------------- ROUTES ----------------
 
 @router.post("/")
 def add_trusted_contact(
@@ -49,18 +35,19 @@ def add_trusted_contact(
             detail="At least email or phone is required",
         )
 
-    # ---- ENFORCE PLAN LIMIT ----
     current_count = db.execute(
-        text("""
+        text(
+            """
             SELECT COUNT(*)
             FROM trusted_contacts
             WHERE owner_user_id = CAST(:uid AS uuid)
               AND status = 'ACTIVE'
-        """),
+        """
+        ),
         {"uid": str(current_user.id)},
     ).scalar()
 
-    max_allowed = get_contact_limit(current_user.plan)
+    max_allowed = get_feature_limit(current_user, Feature.TRUSTED_CONTACT_LIMIT) or 1
 
     if current_count >= max_allowed:
         raise HTTPException(
@@ -69,12 +56,13 @@ def add_trusted_contact(
                 "error": "PLAN_LIMIT_REACHED",
                 "message": f"Your plan allows only {max_allowed} trusted contact(s)",
                 "plan": current_user.plan,
-                "upgrade_required": current_user.plan == "FREE",
+                "upgrade_required": max_allowed == 1,
             },
         )
 
     db.execute(
-        text("""
+        text(
+            """
             INSERT INTO trusted_contacts (
                 id,
                 owner_user_id,
@@ -93,7 +81,8 @@ def add_trusted_contact(
                 'ACTIVE',
                 now()
             )
-        """),
+        """
+        ),
         {
             "id": str(uuid.uuid4()),
             "uid": str(current_user.id),
@@ -113,7 +102,8 @@ def list_trusted_contacts(
     current_user: User = Depends(get_current_user),
 ):
     rows = db.execute(
-        text("""
+        text(
+            """
             SELECT
                 id,
                 contact_name,
@@ -124,7 +114,8 @@ def list_trusted_contacts(
             FROM trusted_contacts
             WHERE owner_user_id = CAST(:uid AS uuid)
             ORDER BY created_at DESC
-        """),
+        """
+        ),
         {"uid": str(current_user.id)},
     ).mappings().all()
 
@@ -138,12 +129,14 @@ def deactivate_trusted_contact(
     current_user: User = Depends(get_current_user),
 ):
     result = db.execute(
-        text("""
+        text(
+            """
             UPDATE trusted_contacts
             SET status = 'INACTIVE'
             WHERE id = CAST(:cid AS uuid)
               AND owner_user_id = CAST(:uid AS uuid)
-        """),
+        """
+        ),
         {
             "cid": str(contact_id),
             "uid": str(current_user.id),

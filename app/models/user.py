@@ -1,7 +1,8 @@
-from sqlalchemy import Column, String, DateTime
+import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
-import uuid
 
 from app.db import Base
 
@@ -16,11 +17,13 @@ class User(Base):
     phone = Column(String, unique=True)
     role = Column(String, nullable=False)
 
-    # 🔐 AUTH
     password_hash = Column(String, nullable=False)
 
-    # 💳 PLAN MODEL (FREE | PAID)
-    plan = Column(String, nullable=False, default="FREE")
+    # Plan lifecycle is webhook-managed for non-free tiers.
+    plan = Column(String, nullable=False, default="GO_FREE")
+    subscription_status = Column(String, nullable=False, default="ACTIVE")
+    subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_subscription_event_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
         DateTime(timezone=True),
@@ -33,8 +36,11 @@ class User(Base):
         onupdate=func.now()
     )
 
-    # 🔥 SESSION INVALIDATION SUPPORT
     password_changed_at = Column(
         DateTime(timezone=True),
         nullable=True
     )
+
+    preferred_language = Column(String, nullable=False, default="en", server_default="en")
+    ai_image_lifetime_used = Column(Integer, nullable=False, default=0, server_default="0")
+    first_upgrade_used = Column(Boolean, nullable=False, default=False, server_default="false")

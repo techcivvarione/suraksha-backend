@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 from collections import Counter
 
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.core.features import Feature
 from app.db import get_db
-from app.routes.auth import get_current_user
+from app.dependencies.access import require_feature
 from app.models.user import User
 
 router = APIRouter(prefix="/risk", tags=["Risk Insights"])
@@ -18,28 +20,13 @@ SUSPICIOUS_KEYWORDS = [
 @router.get("/insights")
 def paid_risk_insights(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_feature(Feature.RISK_INSIGHTS)
+    ),
 ):
-    # 🔐 PAID ONLY
-    if current_user.plan != "PAID":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "upgrade_required": True,
-                "message": "Upgrade to access advanced risk insights",
-                "features": [
-                    "Behavioral scam patterns",
-                    "Risk timeline analysis",
-                    "Personalized security recommendations"
-                ],
-            },
-        )
-
-    # ------------------------------
-    # 1️⃣ RISK DISTRIBUTION BY DAY
-    # ------------------------------
     rows = db.execute(
-        text("""
+        text(
+            """
             SELECT
                 DATE(created_at) AS day,
                 risk,
@@ -49,33 +36,33 @@ def paid_risk_insights(
               AND created_at >= NOW() - INTERVAL '30 days'
             GROUP BY day, risk
             ORDER BY day
-        """),
+        """
+        ),
         {"uid": str(current_user.id)},
     ).mappings().all()
 
     risk_days = {}
-    for r in rows:
-        day = str(r["day"])
+    for row in rows:
+        day = str(row["day"])
         if day not in risk_days:
             risk_days[day] = {"high": 0, "medium": 0, "low": 0}
-        risk_days[day][r["risk"]] += r["count"]
+        risk_days[day][row["risk"]] += row["count"]
 
     peak_risk_days = sorted(
         risk_days.items(),
-        key=lambda x: x[1]["high"],
-        reverse=True
+        key=lambda item: item[1]["high"],
+        reverse=True,
     )[:3]
 
-    # ------------------------------
-    # 2️⃣ KEYWORD PATTERN ANALYSIS
-    # ------------------------------
     texts = db.execute(
-        text("""
+        text(
+            """
             SELECT input_text
             FROM scan_history
             WHERE user_id = CAST(:uid AS uuid)
               AND created_at >= NOW() - INTERVAL '30 days'
-        """),
+        """
+        ),
         {"uid": str(current_user.id)},
     ).scalars().all()
 
@@ -84,16 +71,13 @@ def paid_risk_insights(
     for text_value in texts:
         if not text_value:
             continue
-        t = text_value.lower()
-        for kw in SUSPICIOUS_KEYWORDS:
-            if kw in t:
-                keyword_hits[kw] += 1
+        lowered = text_value.lower()
+        for keyword in SUSPICIOUS_KEYWORDS:
+            if keyword in lowered:
+                keyword_hits[keyword] += 1
 
     top_keywords = keyword_hits.most_common(5)
 
-    # ------------------------------
-    # 3️⃣ RECOMMENDATIONS
-    # ------------------------------
     recommendations = []
 
     if keyword_hits.get("otp", 0) >= 2:
@@ -124,7 +108,8 @@ def paid_risk_insights(
                 for day, stats in peak_risk_days
             ],
             "top_scam_keywords": [
-                {"keyword": k, "count": c} for k, c in top_keywords
+                {"keyword": keyword, "count": count}
+                for keyword, count in top_keywords
             ],
         },
         "recommendations": recommendations,

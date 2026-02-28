@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import uuid
@@ -9,16 +9,25 @@ from app.db import get_db
 from app.routes.auth import get_current_user
 from app.models.user import User
 from app.services.ai_image_service import detect_ai_image
+from app.services.plan_limits import LimitType, enforce_limit
 
 router = APIRouter(prefix="/analyze", tags=["Analyzer"])
 
 
 @router.post("/ai-image")
 def analyze_ai_image(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    enforce_limit(
+        current_user,
+        LimitType.AI_IMAGE_LIFETIME,
+        db=db,
+        endpoint=request.url.path,
+    )
+
     # Validate file
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are supported")
