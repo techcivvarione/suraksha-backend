@@ -1,11 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
+import os
+import secrets
+import time
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -13,12 +17,13 @@ from sqlalchemy import text
 from app.db import get_db
 from app.core.features import TIER_FREE
 from app.models.user import User
+from app.models.email_otp import EmailOtp
 from app.services.audit_logger import create_audit_log
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
+from app.services.email_service import send_email
+from app.services.email_otp_rate_limiter import allow_email_send, allow_ip_send
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
-
-import os
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 
@@ -31,6 +36,17 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+# ---------------- SECURE EMAIL OTP CONFIG ----------------
+OTP_SECRET_SALT = os.getenv("OTP_SECRET_SALT")
+if not OTP_SECRET_SALT:
+    raise RuntimeError("OTP_SECRET_SALT not set in environment")
+
+OTP_EXPIRY_MINUTES = 5
+OTP_LENGTH = 6
+OTP_MAX_ATTEMPTS = 5
+OTP_LOCK_MINUTES = 15
+OTP_MIN_RESPONSE_MS = 300
 
 # ---------------- RATE LIMIT CONFIG ----------------
 MAX_ATTEMPTS = 5
@@ -74,6 +90,37 @@ def rate_limit(key: str, db: Session):
     )
 
     db.commit()
+
+
+# ---------------- SECURE EMAIL OTP HELPERS ----------------
+def _generate_otp() -> str:
+    number = secrets.randbelow(10**OTP_LENGTH)
+    return str(number).zfill(OTP_LENGTH)
+
+
+def _hash_otp(raw_otp: str) -> str:
+    payload = f"{OTP_SECRET_SALT}:{raw_otp}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _ensure_min_delay(start_time: float):
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    remaining = OTP_MIN_RESPONSE_MS - elapsed_ms
+    if remaining > 0:
+        time.sleep(remaining / 1000)
+
+
+def _compare_otp(stored_hash: str, provided_otp: str) -> bool:
+    candidate_hash = _hash_otp(provided_otp)
+    return hmac.compare_digest(stored_hash, candidate_hash)
+
+
+def _normalize_email(email: EmailStr) -> str:
+    return email.strip().lower()
+
+
+GENERIC_SEND_RESPONSE = {"message": "If the email is valid, an OTP has been sent."}
+GENERIC_VERIFY_FAILURE = {"success": False, "message": "Verification failed."}
 
 
 # ---------------- PASSWORD / TOKEN ----------------
@@ -170,6 +217,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# SECURE EMAIL OTP START
+class SendEmailOtpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+
+
+class VerifyEmailOtpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    otp: str
+# SECURE EMAIL OTP END
+
+
 # ---------------- PASSWORD STRENGTH ----------------
 import re
 
@@ -188,6 +248,94 @@ def validate_password_strength(password: str):
 
 
 # ---------------- ROUTES ----------------
+# SECURE EMAIL OTP START
+@router.post("/send-email-otp")
+def send_email_otp(payload: SendEmailOtpRequest, request: Request, db: Session = Depends(get_db)):
+    normalized_email = _normalize_email(payload.email)
+    client_ip = request.client.host or "unknown"
+
+    email_allowed = allow_email_send(normalized_email)
+    ip_allowed = allow_ip_send(client_ip)
+    if not (email_allowed and ip_allowed):
+        return GENERIC_SEND_RESPONSE
+
+    otp = _generate_otp()
+    otp_hash = _hash_otp(otp)
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+    with db.begin():
+        existing = (
+            db.query(EmailOtp)
+            .with_for_update(nowait=False)
+            .filter(EmailOtp.email == normalized_email)
+            .one_or_none()
+        )
+        if existing is None:
+            record = EmailOtp(
+                email=normalized_email,
+                otp_hash=otp_hash,
+                otp_expires_at=expires_at,
+                otp_attempts=0,
+                otp_locked_until=None,
+            )
+            db.add(record)
+        else:
+            existing.otp_hash = otp_hash
+            existing.otp_expires_at = expires_at
+            existing.otp_attempts = 0
+            existing.otp_locked_until = None
+
+    # Do not log OTP; email content only.
+    send_email(
+        to_email=normalized_email,
+        subject="Your GO Suraksha verification code",
+        html_body=f"<p>Your verification code is <strong>{otp}</strong>. It expires in 5 minutes.</p>",
+    )
+
+    return GENERIC_SEND_RESPONSE
+
+
+@router.post("/verify-email-otp")
+def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Session = Depends(get_db)):
+    start_time = time.perf_counter()
+    normalized_email = _normalize_email(payload.email)
+    provided_otp = payload.otp.strip()
+
+    if len(provided_otp) != OTP_LENGTH or not provided_otp.isdigit():
+        _ensure_min_delay(start_time)
+        return GENERIC_VERIFY_FAILURE
+
+    response_payload = GENERIC_VERIFY_FAILURE
+
+    with db.begin():
+        record = (
+            db.query(EmailOtp)
+            .with_for_update(nowait=False)
+            .filter(EmailOtp.email == normalized_email)
+            .one_or_none()
+        )
+
+        now = datetime.now(tz=timezone.utc)
+
+        if record is None:
+            response_payload = GENERIC_VERIFY_FAILURE
+        elif record.otp_locked_until and record.otp_locked_until > now:
+            response_payload = {"success": False, "message": "Too many attempts. Try again later."}
+        elif record.otp_expires_at < now:
+            response_payload = GENERIC_VERIFY_FAILURE
+        elif not _compare_otp(record.otp_hash, provided_otp):
+            record.otp_attempts += 1
+            if record.otp_attempts >= OTP_MAX_ATTEMPTS:
+                record.otp_locked_until = now + timedelta(minutes=OTP_LOCK_MINUTES)
+            response_payload = GENERIC_VERIFY_FAILURE
+        else:
+            db.delete(record)
+            response_payload = {"success": True}
+
+    _ensure_min_delay(start_time)
+    return response_payload
+# SECURE EMAIL OTP END
+
 @router.post("/signup")
 def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"signup:{request.client.host}", db)

@@ -1,0 +1,10 @@
+-- SECURE EMAIL OTP START
+CREATE TABLE IF NOT EXISTS email_otps (
+    email VARCHAR PRIMARY KEY,
+    otp_hash CHAR(64) NOT NULL,
+    otp_expires_at TIMESTAMPTZ NOT NULL,
+    otp_attempts INTEGER NOT NULL DEFAULT 0,
+    otp_locked_until TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- SECURE EMAIL OTP END
