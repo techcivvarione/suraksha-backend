@@ -1,4 +1,4 @@
-// SECURE EMAIL OTP START
+# SECURE EMAIL OTP START
 import datetime
 
 from sqlalchemy import Column, DateTime, Integer, String
@@ -16,4 +16,4 @@ class EmailOtp(Base):
     otp_attempts = Column(Integer, nullable=False, default=0)
     otp_locked_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-// SECURE EMAIL OTP END
+# SECURE EMAIL OTP END

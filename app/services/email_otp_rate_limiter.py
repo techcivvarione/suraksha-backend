@@ -1,4 +1,4 @@
-// SECURE EMAIL OTP START
+# SECURE EMAIL OTP START
 from redis.exceptions import RedisError
 
 from app.services.redis_store import allow_sliding_window, build_hashed_key
@@ -42,4 +42,4 @@ def allow_ip_send(ip: str) -> bool:
         )
     except RedisError:
         return False
-// SECURE EMAIL OTP END
+# SECURE EMAIL OTP END
