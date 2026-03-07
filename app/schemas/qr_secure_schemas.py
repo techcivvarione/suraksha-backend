@@ -18,6 +18,7 @@ class QrAnalyzeResponse(BaseModel):
     risk_score: int
     risk_level: str
     detected_type: str
+    original_payload: str
     reasons: List[str]
     recommended_action: str
     is_flagged: bool

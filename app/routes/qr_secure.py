@@ -144,6 +144,7 @@ def analyze_qr(
             risk_score=risk_score,
             risk_level=risk_level,
             detected_type=detected_type.value,
+            original_payload=normalized,
             reasons=reasons or ["No issues detected"],
             recommended_action=recommended_action,
             is_flagged=is_flagged,
