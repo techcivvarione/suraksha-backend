@@ -287,7 +287,7 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str, is_paid: bo
 
     user_ctx = _PlanUser(user_plan)
     has_email_details = has_feature(user_ctx, Feature.EMAIL_BREACH_DETAILS)
-    is_paid = bool(is_paid or has_feature(user_ctx, Feature.PASSWORD_BREACH_DETAILS))
+    is_paid = bool(is_paid)
 
     # ===================== THREAT =====================
     if scan_type == "THREAT":

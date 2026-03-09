@@ -67,7 +67,6 @@ from app.routes.news import router as news_router
 from app.routes.home import router as home_router
 from app.routes.history import router as history_router
 
-from app.routes.analyze import router as analyze_router
 from app.routes.analyze_ocr import router as analyze_ocr_router
 
 from app.routes.security import router as security_router
@@ -106,7 +105,6 @@ app.include_router(news_router)
 app.include_router(home_router)
 app.include_router(history_router)
 
-app.include_router(analyze_router)
 app.include_router(analyze_ocr_router)
 
 app.include_router(security_router)
