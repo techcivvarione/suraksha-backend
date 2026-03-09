@@ -70,4 +70,6 @@ def analyze_qr(raw_payload: str) -> dict:
         "confidence": None,
         "reasons": reasons,
         "recommendation": recommendation,
+        "detected_type": detected_type.value if hasattr(detected_type, "value") else str(detected_type),
+        "original_payload": raw_payload,
     }

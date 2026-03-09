@@ -12,6 +12,7 @@ def build_scan_response(
     recommendation: str,
     confidence: Optional[float] = None,
     scan_id: uuid.UUID | None = None,
+    **extra,
 ) -> ScanResponse:
     sid = scan_id or uuid.uuid4()
     return ScanResponse(
@@ -22,4 +23,5 @@ def build_scan_response(
         confidence=confidence,
         reasons=reasons,
         recommendation=recommendation,
+        **extra,
     )

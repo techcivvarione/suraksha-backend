@@ -6,9 +6,10 @@ from typing import Callable, Tuple
 from fastapi import HTTPException, UploadFile, status
 
 
-def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int]:
+def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int, str]:
     fd, path = tempfile.mkstemp(prefix="gosuraksha_media_", suffix=".bin")
     size = 0
+    hash_ctx = sha256()
     try:
         with os.fdopen(fd, "wb") as out:
             while True:
@@ -19,9 +20,10 @@ def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int]:
                 if size > max_size:
                     raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
                 out.write(chunk)
+                hash_ctx.update(chunk)
         if size == 0:
             raise HTTPException(status_code=400, detail="Empty file")
-        return path, size
+        return path, size, hash_ctx.hexdigest()
     except Exception:
         if os.path.exists(path):
             try:
@@ -43,7 +45,7 @@ def process_upload(
     if mime not in allowed_mimes:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
-    path, size = _write_temp(file, max_size)
+    path, size, file_hash = _write_temp(file, max_size)
 
     try:
         with open(path, "rb") as fh:
@@ -51,7 +53,6 @@ def process_upload(
             if not magic_check(header):
                 raise HTTPException(status_code=400, detail="Corrupted or invalid file")
 
-        file_hash = sha256(f"{mime}:{size}".encode("utf-8")).hexdigest()
         return path, size, mime, file_hash
     except Exception:
         if os.path.exists(path):

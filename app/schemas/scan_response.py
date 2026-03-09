@@ -12,3 +12,8 @@ class ScanResponse(BaseModel):
     confidence: Optional[float] = None
     reasons: List[str]
     recommendation: str
+    detected_type: Optional[str] = None
+    original_payload: Optional[str] = None
+    reputation_scan_count: Optional[int] = None
+    reputation_report_count: Optional[int] = None
+    is_flagged: Optional[bool] = None
