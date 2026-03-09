@@ -8,7 +8,7 @@ from redis.exceptions import RedisError
 from app.routes.auth import get_current_user
 from app.services.deepfake_service import DeepfakeService, DeepfakeServiceError
 from app.services.media_validator import validate_upload
-from app.services.risk_mapper import map_risk
+from app.services.risk_mapper import map_probability_to_risk
 from app.services.redis_store import acquire_cooldown, allow_daily_limit, allow_sliding_window
 from app.services.media_analysis_store import store_recent_analysis
 
@@ -52,8 +52,18 @@ async def analyze_media(
     try:
         api_resp = await deepfake_service.analyze(validation.path, validation.mime)
         prob = float(api_resp.get("synthetic_probability", 0.0))
-        conf = float(api_resp.get("confidence", 0.0))
-        score, level, mapped = map_risk(prob, conf, validation.analysis_type)
+        prob = max(0.0, min(1.0, prob))
+        risk = map_probability_to_risk(prob)
+        score, level = risk["risk_score"], risk["risk_level"]
+        mapped = {
+            "risk_score": score,
+            "risk_level": level,
+            "analysis_type": validation.analysis_type,
+            "confidence": prob,
+            "reasons": [f"Synthetic probability {prob:.2f}"],
+            "recommendation": "Do not trust this media without verification." if level == "HIGH" else "Verify source before acting." if level == "MEDIUM" else "No strong manipulation indicators detected.",
+            "scan_id": correlation_id,
+        }
 
         logger.info(
             "media_analyze_complete",
