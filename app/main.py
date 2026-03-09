@@ -87,6 +87,8 @@ from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
 from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr_secure import router as qr_secure_router
+from app.routes.media import router as media_router
+from app.routes.alerts import router as alerts_router
 from app.routes.webhooks import router as webhooks_router
 
 
@@ -117,6 +119,8 @@ app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
 app.include_router(ai_image_router)
 app.include_router(qr_secure_router)
+app.include_router(media_router)
+app.include_router(alerts_router)
 app.include_router(webhooks_router)
 
 

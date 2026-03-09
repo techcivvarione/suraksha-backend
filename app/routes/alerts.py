@@ -1,249 +1,109 @@
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from datetime import datetime
 import uuid
+import logging
+from datetime import datetime, timedelta, timezone
 
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from redis.exceptions import RedisError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from app.db import get_db
-from app.models.user import User
+from app.models.alert_event import AlertEvent
 from app.routes.auth import get_current_user
+from app.services.alert_rate_limiter import enforce_alert_limits, AlertRateLimiterError
+from app.services.alert_validator import validate_request_payload, validate_recent_analysis
+from app.services.notification_service import NotificationService, NotificationError
+from sqlalchemy import text
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
+logger = logging.getLogger(__name__)
+notifier = NotificationService()
 
 
-# ---------- MODELS ----------
-class SubscribeRequest(BaseModel):
-    categories: list[str]
-
-
-# ---------- HELPERS ----------
-def severity_for(category: str, alert_type: str) -> str:
-    if alert_type == "history":
-        return "HIGH"
-    if category.lower() in ["cyber", "cyber crime", "ai", "govt"]:
-        return "HIGH"
-    if category.lower() in ["banking", "upi", "finance"]:
-        return "MEDIUM"
-    return "LOW"
-
-
-# ---------- ROUTES ----------
-@router.post("/subscribe")
-def subscribe_alerts(
-    payload: SubscribeRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+@router.post("/media-risk", status_code=200)
+def trigger_media_alert(
+    payload: dict,
+    request: Request,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db, use_cache=False),
 ):
-    # 🔴 REMOVE OLD SUBSCRIPTIONS (FIXED)
-    db.execute(
-        text("""
-            DELETE FROM alert_subscriptions
-            WHERE user_id = CAST(:uid AS uuid)
-        """),
-        {"uid": str(current_user.id)},
+    correlation_id = uuid.uuid4().hex
+    client_ip = request.client.host or "unknown"
+    user_id = str(current_user.id)
+
+    try:
+        validate_request_payload(payload)
+    except HTTPException:
+        raise
+
+    # confirm trusted contact exists
+    contact = db.execute(
+        text(
+            """
+            SELECT id
+            FROM trusted_contacts
+            WHERE owner_user_id = CAST(:uid AS uuid)
+              AND status = 'ACTIVE'
+            LIMIT 1
+            """
+        ),
+        {"uid": user_id},
+    ).first()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No trusted contact configured")
+
+    try:
+        enforce_alert_limits(user_id, client_ip, payload["media_hash"])
+    except AlertRateLimiterError as exc:
+        msg = str(exc)
+        if msg == "Duplicate alert within cooldown":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg)
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limited")
+
+    # validate recent analysis (redis-backed freshness + ownership)
+    validate_recent_analysis(db, user_id, payload["media_hash"])
+
+    try:
+        event = AlertEvent(
+            user_id=current_user.id,
+            media_hash=payload["media_hash"],
+            analysis_type=payload["analysis_type"],
+            risk_score=int(payload["risk_score"]),
+            notified_contact_id=None,
+            status="SENT",
+        )
+        db.add(event)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to process alert")
+
+    try:
+        notifier.send_alert(
+            db=db,
+            user_id=user_id,
+            media_hash=payload["media_hash"],
+            analysis_type=payload["analysis_type"],
+            risk_score=int(payload["risk_score"]),
+        )
+    except NotificationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Unable to process alert")
+
+    logger.info(
+        "media_alert_sent",
+        extra={
+            "cid": correlation_id,
+            "user_id": user_id,
+            "ip": client_ip,
+            "media_hash_prefix": payload["media_hash"][:8],
+            "analysis_type": payload["analysis_type"],
+            "risk_score": int(payload["risk_score"]),
+        },
     )
 
-    # 🟢 INSERT NEW SUBSCRIPTIONS
-    for category in payload.categories:
-        db.execute(
-            text("""
-                INSERT INTO alert_subscriptions (
-                    id, user_id, category, created_at
-                )
-                VALUES (
-                    :id, CAST(:uid AS uuid), :cat, now()
-                )
-                ON CONFLICT DO NOTHING
-            """),
-            {
-                "id": str(uuid.uuid4()),
-                "uid": str(current_user.id),
-                "cat": category,
-            },
-        )
-
-    db.commit()
-    return {"status": "subscribed", "categories": payload.categories}
-
-
-@router.get("/")
-def get_alerts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    rows = db.execute(
-        text("""
-            SELECT *
-            FROM alerts
-            WHERE user_id = CAST(:uid AS uuid)
-            ORDER BY
-                CASE severity
-                    WHEN 'HIGH' THEN 1
-                    WHEN 'MEDIUM' THEN 2
-                    ELSE 3
-                END,
-                created_at DESC
-        """),
-        {"uid": str(current_user.id)},
-    ).mappings().all()
-
-    return {"count": len(rows), "alerts": rows}
-
-
-@router.get("/refresh")
-def refresh_alerts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    created = 0
-
-    # ---------- SUBSCRIPTIONS ----------
-    subs = db.execute(
-        text("""
-            SELECT category
-            FROM alert_subscriptions
-            WHERE user_id = CAST(:uid AS uuid)
-        """),
-        {"uid": str(current_user.id)},
-    ).scalars().all()
-
-    if not subs:
-        return {"status": "no_subscriptions", "new_alerts_created": 0}
-
-    # ---------- NEWS → ALERTS ----------
-    news_rows = db.execute(
-        text("""
-            SELECT id, headline, matter, category, source
-            FROM news
-            WHERE category = ANY(:cats)
-            ORDER BY published_at DESC
-            LIMIT 50
-        """),
-        {"cats": subs},
-    ).mappings().all()
-
-    for news in news_rows:
-        exists = db.execute(
-            text("""
-                SELECT 1 FROM alerts
-                WHERE user_id = CAST(:uid AS uuid)
-                  AND source = :src
-            """),
-            {"uid": str(current_user.id), "src": news["source"]},
-        ).first()
-
-        if not exists:
-            db.execute(
-                text("""
-                    INSERT INTO alerts (
-                        id, user_id, type, title, message,
-                        category, severity, source, read, created_at
-                    )
-                    VALUES (
-                        :id, CAST(:uid AS uuid), 'news',
-                        :title, :msg,
-                        :cat, :sev, :src, false, now()
-                    )
-                """),
-                {
-                    "id": str(uuid.uuid4()),
-                    "uid": str(current_user.id),
-                    "title": news["headline"],
-                    "msg": news["matter"],
-                    "cat": news["category"],
-                    "sev": severity_for(news["category"], "news"),
-                    "src": news["source"],
-                },
-            )
-            created += 1
-
-    # ---------- HISTORY → ALERTS ----------
-    rows = db.execute(
-        text("""
-            SELECT input_text
-            FROM scan_history
-            WHERE user_id = CAST(:uid AS uuid)
-        """),
-        {"uid": str(current_user.id)},
-    ).scalars().all()
-
-    keyword_count = {}
-    for text_val in rows:
-        t = text_val.lower()
-        for k in ["otp", "upi", "bank", "lottery", "job"]:
-            if k in t:
-                keyword_count[k] = keyword_count.get(k, 0) + 1
-
-    for k, count in keyword_count.items():
-        if count >= 2:
-            src = f"history-{k}"
-            exists = db.execute(
-                text("""
-                    SELECT 1 FROM alerts
-                    WHERE user_id = CAST(:uid AS uuid)
-                      AND source = :src
-                """),
-                {"uid": str(current_user.id), "src": src},
-            ).first()
-
-            if not exists:
-                db.execute(
-                    text("""
-                        INSERT INTO alerts (
-                            id, user_id, type, title, message,
-                            category, severity, source, read, created_at
-                        )
-                        VALUES (
-                            :id, CAST(:uid AS uuid), 'history',
-                            'Repeated scam pattern detected',
-                            :msg,
-                            'Personal Risk', 'HIGH',
-                            :src, false, now()
-                        )
-                    """),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "uid": str(current_user.id),
-                        "msg": f"You have repeatedly encountered {k.upper()} related scams.",
-                        "src": src,
-                    },
-                )
-                created += 1
-
-    db.commit()
-    return {"status": "refreshed", "new_alerts_created": created}
-
-
-@router.get("/summary")
-def alert_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    rows = db.execute(
-        text("""
-            SELECT severity, COUNT(*)
-            FROM alerts
-            WHERE user_id = CAST(:uid AS uuid)
-              AND read = false
-            GROUP BY severity
-        """),
-        {"uid": str(current_user.id)},
-    ).all()
-
-    summary = {"high": 0, "medium": 0, "low": 0}
-    for sev, count in rows:
-        summary[sev.lower()] = count
-
-    risk = "Low"
-    if summary["high"] > 0:
-        risk = "High"
-    elif summary["medium"] > 0:
-        risk = "Medium"
-
     return {
-        "risk_level_today": risk,
-        "unread_alerts": summary,
-        "generated_at": datetime.utcnow(),
+        "status": "ALERT_SENT",
+        "message": "Trusted contact notified successfully.",
     }

@@ -1,0 +1,79 @@
+import logging
+import os
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from redis.exceptions import RedisError
+
+from app.routes.auth import get_current_user
+from app.services.deepfake_service import DeepfakeService, DeepfakeServiceError
+from app.services.media_validator import validate_upload
+from app.services.risk_mapper import map_risk
+from app.services.redis_store import acquire_cooldown, allow_daily_limit, allow_sliding_window
+from app.services.media_analysis_store import store_recent_analysis
+
+router = APIRouter(prefix="/media", tags=["Media"])
+logger = logging.getLogger(__name__)
+
+deepfake_service = DeepfakeService(
+    api_url=os.getenv("DEEPFAKE_API_URL") or "",
+    api_key=os.getenv("DEEPFAKE_API_KEY"),
+    timeout=15.0,
+)
+
+
+@router.post("/analyze", status_code=200)
+async def analyze_media(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    correlation_id = uuid.uuid4().hex
+    client_ip = request.client.host or "unknown"
+    user_id = str(current_user.id)
+
+    try:
+        if not allow_daily_limit("media:user:daily", 10, user_id):
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limited")
+        if not allow_sliding_window("media:ip", 30, 3600, client_ip):
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limited")
+    except RedisError:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limiter unavailable")
+
+    validation = validate_upload(file)
+
+    try:
+        if not acquire_cooldown("media:cooldown", 30, user_id, validation.file_hash):
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Duplicate upload cooldown")
+    except RedisError:
+        # fail closed
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limiter unavailable")
+
+    try:
+        api_resp = await deepfake_service.analyze(validation.path, validation.mime)
+        prob = float(api_resp.get("synthetic_probability", 0.0))
+        conf = float(api_resp.get("confidence", 0.0))
+        score, level, mapped = map_risk(prob, conf, validation.analysis_type)
+
+        logger.info(
+            "media_analyze_complete",
+            extra={
+                "cid": correlation_id,
+                "user_id": user_id,
+                "ip": client_ip,
+                "mime": validation.mime,
+                "size": validation.size,
+                "risk_score": score,
+                "risk_level": level,
+            },
+        )
+        store_recent_analysis(user_id, validation.file_hash, validation.analysis_type, score, level)
+        return mapped
+    except DeepfakeServiceError:
+        raise HTTPException(status_code=500, detail="Media analysis failed")
+    finally:
+        if os.path.exists(validation.path):
+            try:
+                os.remove(validation.path)
+            except Exception:
+                pass
