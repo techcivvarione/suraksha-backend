@@ -15,12 +15,17 @@ router = APIRouter(prefix="/ai", tags=["AI Explanations"])
 
 @router.post("/explain")
 def explain_scan(
-    scan_id: str,
+    payload: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_feature(Feature.AI_EXPLAIN)
     ),
 ):
+    scan_id = payload.get("scan_id") if isinstance(payload, dict) else None
+    text_input = payload.get("text") if isinstance(payload, dict) else None
+    if not scan_id and not text_input:
+        raise HTTPException(status_code=400, detail="scan_id or text required")
+
     scan = db.execute(
         text(
             """
@@ -30,36 +35,21 @@ def explain_scan(
               AND user_id = CAST(:uid AS uuid)
         """
         ),
-        {"sid": scan_id, "uid": str(current_user.id)},
+        {"sid": scan_id, "uid": str(current_user.id)} if scan_id else {"sid": "00000000-0000-0000-0000-000000000000", "uid": str(current_user.id)},
     ).mappings().first()
 
-    if not scan:
+    if not scan and not text_input:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     explanation = generate_ai_explanation(
         scan_type="SECURITY_SCAN",
-        risk=scan["risk"],
-        score=scan["score"],
-        reasons=scan["reasons"],
+        risk=scan["risk"] if scan else None,
+        score=scan["score"] if scan else None,
+        reasons=scan["reasons"] if scan else [],
+        text=text_input,
     )
-
-    db.execute(
-        text(
-            """
-            INSERT INTO ai_explanations (id, scan_id, user_id, explanation)
-            VALUES (:id, :sid, :uid, :exp)
-        """
-        ),
-        {
-            "id": str(uuid.uuid4()),
-            "sid": scan_id,
-            "uid": str(current_user.id),
-            "exp": explanation,
-        },
-    )
-    db.commit()
 
     return {
-        "scan_id": scan_id,
+        "scan_id": scan_id or str(uuid.uuid4()),
         "ai_explanation": explanation,
     }

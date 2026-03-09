@@ -16,6 +16,7 @@ class HIBPProvider(EmailBreachProvider):
         count = res.get("count", len(breaches) if res.get("breached") else 0)
         latest_year = None
         sources = []
+        formatted = []
         for breach in breaches:
             date = breach.get("breach_date") or breach.get("BreachDate")
             if date:
@@ -27,8 +28,17 @@ class HIBPProvider(EmailBreachProvider):
             name = breach.get("name") or breach.get("Name")
             if name:
                 sources.append(name)
+            formatted.append(
+                {
+                    "name": breach.get("name") or breach.get("Name"),
+                    "domain": breach.get("domain") or breach.get("Domain"),
+                    "breach_date": breach.get("breach_date") or breach.get("BreachDate"),
+                    "compromised_data": breach.get("data_classes") or breach.get("DataClasses"),
+                }
+            )
         return {
             "breach_count": count,
             "latest_year": latest_year,
             "sources": sources or None,
+            "breaches": formatted or None,
         }

@@ -17,3 +17,5 @@ class ScanResponse(BaseModel):
     reputation_scan_count: Optional[int] = None
     reputation_report_count: Optional[int] = None
     is_flagged: Optional[bool] = None
+    breach_count: Optional[int] = None
+    breaches: Optional[list] = None

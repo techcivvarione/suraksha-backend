@@ -48,16 +48,25 @@ def scan_email(
         # fail closed on redis errors
         raise HTTPException(status_code=429, detail="Rate limited")
 
-    result = analyze_email(normalized, user_plan=current_user.plan or "GO_FREE")
+    user_plan = (current_user.plan or "GO_FREE").upper()
+    is_paid_user = user_plan in {"GO_PRO", "GO_ULTRA"}
+    result = analyze_email(normalized, user_plan=user_plan)
+
+    base_response = {
+        "analysis_type": ScanType.EMAIL.value,
+        "risk_score": result["risk_score"],
+        "risk_level": result["risk_level"],
+        "reasons": result["reasons"],
+        "recommendation": result["recommendation"],
+        "confidence": result["confidence"],
+        "breach_count": result.get("breach_count"),
+    }
+    if is_paid_user:
+        base_response["breaches"] = result.get("breaches")
 
     response = build_scan_response(
-        analysis_type=ScanType.EMAIL.value,
-        risk_score=result["risk_score"],
-        risk_level=result["risk_level"],
-        reasons=result["reasons"],
-        recommendation=result["recommendation"],
-        confidence=result["confidence"],
         scan_id=scan_id,
+        **base_response,
     )
 
     log_scan_event(

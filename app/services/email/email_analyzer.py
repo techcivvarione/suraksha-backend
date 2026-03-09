@@ -26,16 +26,24 @@ def analyze_email(email: str, user_plan: str = "GO_FREE") -> dict:
     cache_key = _cache_key(normalized)
 
     cached = get_json("email_breach", cache_key)
+    breaches = None
     if cached:
         breach_count = cached.get("breach_count", 0)
         latest_year = cached.get("latest_year")
+        breaches = cached.get("breaches")
     else:
         provider = HIBPProvider(user_plan=user_plan)
         res = provider.lookup(normalized)
         breach_count = res.get("breach_count", 0)
         latest_year = res.get("latest_year")
+        breaches = res.get("breaches")
         try:
-            set_json("email_breach", {"breach_count": breach_count, "latest_year": latest_year}, CACHE_TTL, cache_key)
+            set_json(
+                "email_breach",
+                {"breach_count": breach_count, "latest_year": latest_year, "breaches": breaches},
+                CACHE_TTL,
+                cache_key,
+            )
         except RedisError:
             pass
 
@@ -63,4 +71,6 @@ def analyze_email(email: str, user_plan: str = "GO_FREE") -> dict:
         "confidence": None,
         "reasons": reasons,
         "recommendation": recommendation,
+        "breach_count": breach_count,
+        "breaches": breaches,
     }
