@@ -48,6 +48,7 @@ def analyze_ocr(
             scan_type="THREAT",
             content=extracted_text,
             user_plan=current_user.plan,
+            is_paid=bool(getattr(current_user, "is_paid", False)),
         )
     except Exception:
         logging.exception("OCR threat scan failed")

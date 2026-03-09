@@ -133,12 +133,21 @@ def analyze_input(
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    scan_type = request_data.type.upper()
+    raw_input = request_data.input or request_data.content
+    if not raw_input:
+        raise HTTPException(status_code=400, detail="Input required")
+
+    scan_type_raw = request_data.analysis_type or request_data.type
+    if not scan_type_raw:
+        raise HTTPException(status_code=400, detail="analysis_type required")
+
+    scan_type = scan_type_raw.upper()
     user_plan = (current_user.plan or "GO_FREE").upper()
+    is_paid = bool(getattr(current_user, "is_paid", False) or getattr(request_data, "is_paid", False))
     client_ip = request.client.host if request.client else "unknown"
 
     if scan_type == "EMAIL":
-        normalized_email = normalize_email_input(request_data.content)
+        normalized_email = normalize_email_input(raw_input)
         enforce_email_guardrails(
             user_id=str(current_user.id),
             client_ip=client_ip,
@@ -146,7 +155,7 @@ def analyze_input(
         )
         content_to_scan = normalized_email
     else:
-        content_to_scan = request_data.content
+        content_to_scan = raw_input
 
     scan_limit_type = {
         "THREAT": LimitType.THREAT_DAILY,
@@ -166,6 +175,7 @@ def analyze_input(
             scan_type=scan_type,
             content=content_to_scan,
             user_plan=user_plan,
+            is_paid=is_paid,
         )
 
         if result.get("risk") == "dangerous":
@@ -178,7 +188,7 @@ def analyze_input(
         raise HTTPException(status_code=400, detail="Analyze failed")
 
     if scan_type == "THREAT":
-        stored_input = request_data.content
+        stored_input = raw_input
     elif scan_type == "EMAIL":
         stored_input = "EMAIL_CHECK_REDACTED"
     elif scan_type == "PASSWORD":
@@ -295,4 +305,16 @@ def analyze_input(
         except Exception:
             logging.exception("Trusted / family alert failed")
 
-    return AnalyzeResponse(**result)
+    recommendation_map = {
+        "high": "Take immediate action; this appears risky.",
+        "medium": "Use caution and verify before proceeding.",
+        "low": "No major issues detected; stay vigilant.",
+    }
+    risk_level = result["risk"].upper()
+    response_payload = {
+        "risk_score": int(result["score"]),
+        "risk_level": risk_level,
+        "reasons": result.get("reasons", []),
+        "recommendation": recommendation_map.get(result["risk"].lower(), "Stay cautious."),
+    }
+    return AnalyzeResponse(**response_payload)

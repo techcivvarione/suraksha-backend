@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from app.core.features import Feature, has_feature
 from app.services.breach.manager import check_email_breach, get_breach_provider
+from app.services.pwned_passwords import check_password_pwned
 
 # =========================================================
 # CONFIG
@@ -278,7 +279,7 @@ Content:
 # MAIN ENTRY
 # =========================================================
 
-def analyze_input_full(scan_type: str, content: str, user_plan: str):
+def analyze_input_full(scan_type: str, content: str, user_plan: str, is_paid: bool = False):
     scan_type = scan_type.upper()
     class _PlanUser:
         def __init__(self, plan_value: str):
@@ -286,6 +287,7 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
 
     user_ctx = _PlanUser(user_plan)
     has_email_details = has_feature(user_ctx, Feature.EMAIL_BREACH_DETAILS)
+    is_paid = bool(is_paid or has_feature(user_ctx, Feature.PASSWORD_BREACH_DETAILS))
 
     # ===================== THREAT =====================
     if scan_type == "THREAT":
@@ -345,22 +347,25 @@ def analyze_input_full(scan_type: str, content: str, user_plan: str):
 
     # ===================== PASSWORD =====================
     if scan_type == "PASSWORD":
-        provider = get_breach_provider(user_plan)
-        raw = provider.check_password(content)
+        count = check_password_pwned(content)
+        if count == 0:
+            risk = "low"
+            score = 10
+            reasons = ["Password not found in known breach corpus"]
+        elif count < 1000:
+            risk = "medium"
+            score = 60
+            reasons = [f"Password seen {count} times in breaches"]
+        else:
+            risk = "high"
+            score = 90
+            reasons = [f"Password widely exposed ({count} occurrences)"]
 
-        response = {
-            "risk": raw["risk"],
-            "score": raw["score"],
-            "count": raw.get("count", 0),
-            "reasons": raw["reasons"]
+        return {
+            "risk": risk,
+            "score": score,
+            "count": count,
+            "reasons": reasons,
         }
-
-        if not is_paid:
-            response["upgrade"] = {
-                "required": True,
-                "message": "Upgrade to see password breach details",
-            }
-
-        return response
 
     raise ValueError("Invalid scan type")

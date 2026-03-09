@@ -89,6 +89,13 @@ from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr_secure import router as qr_secure_router
 from app.routes.media import router as media_router
 from app.routes.alerts import router as alerts_router
+from app.routes.scan_password import router as scan_password_router
+from app.routes.scan_email import router as scan_email_router
+from app.routes.scan_qr import router as scan_qr_router
+from app.routes.scan_threat import router as scan_threat_router
+from app.routes.scan_reality_image import router as scan_reality_image_router
+from app.routes.scan_reality_video import router as scan_reality_video_router
+from app.routes.scan_reality_audio import router as scan_reality_audio_router
 from app.routes.webhooks import router as webhooks_router
 
 
@@ -121,6 +128,13 @@ app.include_router(ai_image_router)
 app.include_router(qr_secure_router)
 app.include_router(media_router)
 app.include_router(alerts_router)
+app.include_router(scan_password_router)
+app.include_router(scan_email_router)
+app.include_router(scan_qr_router)
+app.include_router(scan_threat_router)
+app.include_router(scan_reality_image_router)
+app.include_router(scan_reality_video_router)
+app.include_router(scan_reality_audio_router)
 app.include_router(webhooks_router)
 
 
