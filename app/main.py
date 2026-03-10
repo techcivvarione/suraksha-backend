@@ -95,6 +95,7 @@ from app.routes.scan_threat import router as scan_threat_router
 from app.routes.scan_reality_image import router as scan_reality_image_router
 from app.routes.scan_reality_video import router as scan_reality_video_router
 from app.routes.scan_reality_audio import router as scan_reality_audio_router
+from app.routes.billing import router as billing_router
 from app.routes.webhooks import router as webhooks_router
 
 
@@ -133,6 +134,7 @@ app.include_router(scan_threat_router)
 app.include_router(scan_reality_image_router)
 app.include_router(scan_reality_video_router)
 app.include_router(scan_reality_audio_router)
+app.include_router(billing_router)
 app.include_router(webhooks_router)
 
 

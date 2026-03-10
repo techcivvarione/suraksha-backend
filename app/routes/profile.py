@@ -39,6 +39,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "phone": current_user.phone,
         "role": current_user.role,
+        "plan": current_user.plan,
         "preferred_language": current_user.preferred_language,
         "created_at": current_user.created_at,
         "updated_at": current_user.updated_at,

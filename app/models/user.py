@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
 from app.db import Base
+from app.enums.user_plan import UserPlan
 
 
 class User(Base):
@@ -20,7 +21,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
 
     # Plan lifecycle is webhook-managed for non-free tiers.
-    plan = Column(String, nullable=False, default="GO_FREE")
+    plan = Column(String, nullable=False, default=UserPlan.FREE.value)
     subscription_status = Column(String, nullable=False, default="ACTIVE")
     subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
     last_subscription_event_at = Column(DateTime(timezone=True), nullable=True)
