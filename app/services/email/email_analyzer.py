@@ -21,7 +21,7 @@ def _cache_key(email: str) -> str:
     return build_hashed_key("email_breach", digest)
 
 
-def analyze_email(email: str, user_plan: str = "GO_FREE") -> dict:
+def analyze_email(email: str, user_plan: str = "FREE") -> dict:
     normalized = _normalize_email(email)
     cache_key = _cache_key(normalized)
 

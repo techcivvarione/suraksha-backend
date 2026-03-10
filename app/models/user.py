@@ -15,10 +15,10 @@ class User(Base):
 
     name = Column(String, nullable=False)
     email = Column(String, unique=True)
-    phone = Column(String, unique=True)
-    role = Column(String, nullable=False)
+    phone_number = Column(String(20), nullable=True, index=True)
 
     password_hash = Column(String, nullable=False)
+    auth_provider = Column(String, nullable=False, default="password")
 
     # Plan lifecycle is webhook-managed for non-free tiers.
     plan = Column(String, nullable=False, default=UserPlan.FREE.value)

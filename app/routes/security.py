@@ -252,7 +252,7 @@ def preview_cyber_complaint(
 ):
     complaint_text = generate_cyber_complaint_text(
         user_name=current_user.name,
-        phone=current_user.phone or "Not provided",
+        phone=current_user.phone_number or "Not provided",
         email=current_user.email,
         scam_type=payload.scam_type,
         incident_date=payload.incident_date,
@@ -472,7 +472,7 @@ def cyber_sos_confirm(
     # 📝 Generate complaint text
     complaint_text = generate_cyber_complaint_text(
     user_name=current_user.name,
-    phone=current_user.phone or "Not provided",
+    phone=current_user.phone_number or "Not provided",
     email=current_user.email,
     scam_type=payload.scam_type,
     incident_date=payload.incident_date,

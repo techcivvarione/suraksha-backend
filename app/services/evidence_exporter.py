@@ -35,7 +35,7 @@ def generate_evidence_bundle(db: Session, user: User):
             "name": user.name,
             "email": user.email,
             "phone": user.phone,
-            "role": user.role,
+            "plan": getattr(user, "plan", None),
             "account_created_at": _dt(user.created_at),
             "password_changed_at": _dt(user.password_changed_at),
         },

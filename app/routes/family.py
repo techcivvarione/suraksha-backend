@@ -23,7 +23,7 @@ def family_dashboard(
                 u.id AS user_id,
                 u.name,
                 u.email,
-                u.phone,
+                u.phone_number,
                 COUNT(sh.id) AS total_scans,
                 COUNT(*) FILTER (WHERE sh.risk = 'high') AS high_risk,
                 COUNT(*) FILTER (WHERE sh.risk = 'medium') AS medium_risk,
@@ -36,7 +36,7 @@ def family_dashboard(
               ON sh.user_id = u.id
             WHERE tc.owner_user_id = CAST(:uid AS uuid)
               AND tc.status = 'ACTIVE'
-            GROUP BY u.id, u.name, u.email, u.phone
+            GROUP BY u.id, u.name, u.email, u.phone_number
             ORDER BY last_scan_at DESC NULLS LAST
         """
         ),
@@ -56,7 +56,7 @@ def family_dashboard(
                 "user_id": row["user_id"],
                 "name": row["name"],
                 "email": row["email"],
-                "phone": row["phone"],
+                "phone_number": row["phone_number"],
                 "security_score": score,
                 "risk_summary": {
                     "high": row["high_risk"],

@@ -48,7 +48,7 @@ def scan_email(
         # fail closed on redis errors
         raise HTTPException(status_code=429, detail="Rate limited")
 
-    user_plan = (current_user.plan or "GO_FREE").upper()
+    user_plan = (current_user.plan or "FREE").upper()
     is_paid_user = user_plan in {"GO_PRO", "GO_ULTRA"}
     result = analyze_email(normalized, user_plan=user_plan)
 

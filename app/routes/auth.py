@@ -6,10 +6,13 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import hashlib
+import logging
 import hmac
 import os
 import secrets
 import time
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -20,12 +23,14 @@ from app.models.user import User
 from app.models.email_otp import EmailOtp
 from app.services.audit_logger import create_audit_log
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
-from app.services.email_service import send_email
+from app.services.email_service import send_otp_email
 from app.services.email_otp_rate_limiter import allow_email_send, allow_ip_send
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY not set in environment")
@@ -132,10 +137,12 @@ def verify_password(password: str, hashed: str) -> bool:
     return pwd_context.verify(password, hashed)
 
 
-def create_access_token(subject: str):
+def create_access_token(user: User):
     now = datetime.now(tz=timezone.utc)
     payload = {
-        "sub": subject,
+        "sub": str(user.id),
+        "email": user.email,
+        "plan": user.plan,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
     }
@@ -205,7 +212,7 @@ class SignupRequest(BaseModel):
 
     name: str
     email: Optional[str]
-    phone: Optional[str]
+    phone_number: Optional[str]
     password: str
     confirm_password: str
 
@@ -228,6 +235,11 @@ class VerifyEmailOtpRequest(BaseModel):
     email: EmailStr
     otp: str
 # SECURE EMAIL OTP END
+
+
+class GoogleAuthRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id_token: str
 
 
 # ---------------- PASSWORD STRENGTH ----------------
@@ -286,11 +298,12 @@ def send_email_otp(payload: SendEmailOtpRequest, request: Request, db: Session =
             existing.otp_locked_until = None
 
     # Do not log OTP; email content only.
-    send_email(
-        to_email=normalized_email,
-        subject="Your GO Suraksha verification code",
-        html_body=f"<p>Your verification code is <strong>{otp}</strong>. It expires in 5 minutes.</p>",
-    )
+    try:
+        send_otp_email(email=normalized_email, otp=otp)
+        email_hash = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()[:10]
+        logger.info("otp email sent", extra={"email_hash": email_hash})
+    except Exception:
+        logger.error("OTP email send failed for %s", normalized_email)
 
     return GENERIC_SEND_RESPONSE
 
@@ -333,6 +346,9 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
             response_payload = {"success": True}
 
     _ensure_min_delay(start_time)
+    if response_payload.get("success"):
+        email_hash = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()[:10]
+        logger.info("otp verified", extra={"email_hash": email_hash})
     return response_payload
 # SECURE EMAIL OTP END
 
@@ -346,7 +362,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     validate_password_strength(payload.password)
 
     exists = db.query(User).filter(
-        (User.email == payload.email) | (User.phone == payload.phone)
+        (User.email == payload.email) | (User.phone_number == payload.phone_number)
     ).first()
     if exists:
         raise HTTPException(status_code=400, detail="User already exists")
@@ -356,8 +372,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     user = User(
         name=payload.name,
         email=payload.email,
-        phone=payload.phone,
-        role="USER",
+        phone_number=payload.phone_number,
         plan=TIER_FREE,
         subscription_status="ACTIVE",
         subscription_expires_at=None,
@@ -392,7 +407,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     rate_limit(f"login:{request.client.host}", db)
 
     user = db.query(User).filter(
-        (User.email == payload.identifier) | (User.phone == payload.identifier)
+        (User.email == payload.identifier) | (User.phone_number == payload.identifier)
     ).first()
 
     if not user or not verify_password(payload.password, user.password_hash):
@@ -405,7 +420,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token(str(user.id))
+    token = create_access_token(user)
 
     create_audit_log(
         db=db,
@@ -418,14 +433,64 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     return {"access_token": token, "token_type": "bearer"}
 
 
+@router.post("/google")
+def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depends(get_db)):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google auth not configured")
+    try:
+        idinfo = id_token.verify_oauth2_token(payload.id_token, google_requests.Request(), GOOGLE_CLIENT_ID)
+    except Exception:
+        logger.warning("google login failure: invalid token")
+        raise HTTPException(status_code=400, detail="Invalid Google token")
+
+    email = idinfo.get("email")
+    name = idinfo.get("name") or (email.split("@")[0] if email else None)
+    picture = idinfo.get("picture")
+    email_verified = idinfo.get("email_verified")
+
+    if not email or not email_verified:
+        logger.warning("google login failure: email not verified")
+        raise HTTPException(status_code=400, detail="Email not verified by Google")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        temp_pwd = secrets.token_hex(16)
+        user = User(
+            name=name or "Google User",
+            email=email,
+            phone_number=None,
+            plan="FREE",
+            auth_provider="google",
+            password_hash=hash_password(temp_pwd),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    token = create_access_token(user)
+    logger.info("google login success", extra={"user_id": str(user.id), "email_hash": hashlib.sha256(email.encode()).hexdigest()[:10]})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "name": user.name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "plan": user.plan,
+            "auth_provider": getattr(user, "auth_provider", "google"),
+            "picture": picture,
+        },
+    }
+
+
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
         "name": current_user.name,
         "email": current_user.email,
-        "phone": current_user.phone,
-        "role": current_user.role,
+        "phone_number": current_user.phone_number,
         "plan": current_user.plan,
         "subscription_status": current_user.subscription_status,
         "subscription_expires_at": current_user.subscription_expires_at,

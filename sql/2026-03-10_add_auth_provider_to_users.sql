@@ -1,0 +1,2 @@
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) NOT NULL DEFAULT 'password';

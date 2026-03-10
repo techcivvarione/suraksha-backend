@@ -18,7 +18,7 @@ class ProfileUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = None
-    phone: Optional[str] = None
+    phone_number: Optional[str] = None
     preferred_language: Optional[str] = None
 
 
@@ -37,8 +37,7 @@ def get_profile(current_user: User = Depends(get_current_user)):
         "id": str(current_user.id),
         "name": current_user.name,
         "email": current_user.email,
-        "phone": current_user.phone,
-        "role": current_user.role,
+        "phone_number": current_user.phone_number,
         "plan": current_user.plan,
         "preferred_language": current_user.preferred_language,
         "created_at": current_user.created_at,
@@ -55,8 +54,8 @@ def update_profile(
     if payload.name is not None:
         current_user.name = payload.name
 
-    if payload.phone is not None:
-        current_user.phone = payload.phone
+    if payload.phone_number is not None:
+        current_user.phone_number = payload.phone_number
 
     if payload.preferred_language is not None:
         normalized = normalize_language(payload.preferred_language, supported=ALLOWED_LANGUAGES)

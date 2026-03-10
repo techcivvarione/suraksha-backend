@@ -6,7 +6,7 @@ from .base import EmailBreachProvider
 
 
 class ExistingBreachManagerProvider(EmailBreachProvider):
-    def __init__(self, user_plan: str = "GO_FREE"):
+    def __init__(self, user_plan: str = "FREE"):
         self.user_plan = user_plan
 
     def lookup(self, email: str) -> Dict[str, Any]:
