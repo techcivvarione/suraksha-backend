@@ -46,6 +46,8 @@ app = FastAPI(
 
 @app.exception_handler(HTTPException)
 async def scan_http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
     if _is_scan_path(request.url.path):
         return JSONResponse(status_code=exc.status_code, content=_scan_error_payload(exc))
     return await http_exception_handler(request, exc)
@@ -88,6 +90,10 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     logger.info("GO Suraksha API starting up")
+
+    from app.services.reality_detection.engine import validate_runtime_dependencies
+
+    validate_runtime_dependencies()
 
     try:
         from app.services.news_ingestor import ingest_rss

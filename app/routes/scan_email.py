@@ -8,7 +8,6 @@ from app.core.features import normalize_plan
 from app.routes.scan_base import (
     apply_scan_rate_limits,
     generate_scan_id,
-    is_unlimited_scan_plan,
     raise_scan_error,
     require_user,
 )
@@ -53,6 +52,8 @@ def scan_email(
         user_limit=50,
         ip_namespace="scan:email:ip",
         ip_limit=120,
+        plan_limit_policy="plan_quota",
+        scan_type="email",
     )
 
     try:
@@ -75,7 +76,7 @@ def scan_email(
         "confidence": result["confidence"],
         "breach_count": result.get("breach_count"),
     }
-    if is_unlimited_scan_plan(current_user):
+    if plan != "FREE":
         base_response["breaches"] = result.get("breaches")
 
     response = build_scan_response(

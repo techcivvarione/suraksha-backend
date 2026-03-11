@@ -4,7 +4,7 @@ Illustrative extended tests; assume fixtures for redis, client, auth_token.
 import hashlib
 
 
-def test_repeated_scan_uses_cache(client, auth_token, monkeypatch):
+def test_repeated_scan_uses_cache(client, go_pro_token, monkeypatch):
     from app.services.email import email_analyzer
 
     call_counter = {"count": 0}
@@ -20,7 +20,7 @@ def test_repeated_scan_uses_cache(client, auth_token, monkeypatch):
     for _ in range(2):
         resp = client.post(
             "/scan/email",
-            headers={"Authorization": f"Bearer {auth_token}"},
+            headers={"Authorization": f"Bearer {go_pro_token}"},
             json={"email": "cached@example.com"},
         )
         assert resp.status_code == 200
@@ -39,11 +39,9 @@ def test_email_rate_limit(client, auth_token, monkeypatch):
 
     def fake_check(*args, **kwargs):
         calls["count"] += 1
-        if calls["count"] == 1:
-            return RateLimitResult(allowed=False, count=50, limit=50)
-        return RateLimitResult(allowed=True, count=1, limit=120)
+        return RateLimitResult(allowed=False, count=1, limit=1)
 
-    monkeypatch.setattr(scan_base, "check_rate_limit", fake_check)
+    monkeypatch.setattr(scan_base, "check_scan_limit", fake_check)
 
     resp = client.post(
         "/scan/email",

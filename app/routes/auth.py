@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import Optional
 from passlib.context import CryptContext
-from jose import jwt, JWTError
+from jose import ExpiredSignatureError, jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
@@ -150,6 +150,26 @@ def create_access_token(user: User):
 
 
 # ---------------- AUTH DEPENDENCY ----------------
+def _redact_auth_header(raw_header: str | None) -> str | None:
+    if not raw_header:
+        return None
+    if not raw_header.startswith("Bearer "):
+        return raw_header[:24]
+    token = raw_header[7:]
+    return f"Bearer {token[:12]}..." if token else "Bearer <empty>"
+
+
+def _auth_error(error: str, message: str, status_code: int = 401) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "success": False,
+            "error": error,
+            "message": message,
+        },
+    )
+
+
 def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -172,38 +192,74 @@ def _resolve_current_user(
     db: Session,
     required: bool,
 ):
+    auth_header = request.headers.get("authorization")
+    logger.info(
+        "auth_token_received",
+        extra={
+            "path": request.url.path,
+            "authorization_header": _redact_auth_header(auth_header),
+            "has_authorization": bool(auth_header),
+            "scheme": getattr(credentials, "scheme", None),
+        },
+    )
+
     if credentials is None:
         if required:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            logger.warning("auth_missing_credentials", extra={"path": request.url.path})
+            raise _auth_error("INVALID_TOKEN", "Invalid token")
         return None
 
     try:
         token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        logger.info(
+            "jwt_payload_decoded",
+            extra={
+                "path": request.url.path,
+                "user_id": payload.get("sub"),
+                "jwt_payload": {
+                    "sub": payload.get("sub"),
+                    "email": payload.get("email"),
+                    "plan": payload.get("plan"),
+                    "iat": payload.get("iat"),
+                    "exp": payload.get("exp"),
+                },
+            },
+        )
 
         user_id = payload.get("sub")
         iat = payload.get("iat")
 
         if not user_id or not iat:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            logger.warning("auth_payload_missing_claims", extra={"path": request.url.path, "jwt_payload": payload})
+            raise _auth_error("INVALID_TOKEN", "Invalid token")
 
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            logger.warning("auth_user_not_found", extra={"path": request.url.path, "user_id": user_id})
+            raise _auth_error("INVALID_TOKEN", "Invalid token")
 
         if user.password_changed_at:
             issued_at = datetime.fromtimestamp(iat, tz=timezone.utc)
             pwd_changed = user.password_changed_at.replace(tzinfo=timezone.utc)
             if issued_at < pwd_changed:
-                raise HTTPException(status_code=401, detail="Session expired")
+                logger.warning("auth_session_expired", extra={"path": request.url.path, "user_id": user_id})
+                raise _auth_error("TOKEN_EXPIRED", "Token expired")
 
         user = maybe_auto_downgrade_expired_subscription(db=db, user=user, request=request)
         request.state.user = user
+        logger.info("auth_user_resolved", extra={"path": request.url.path, "user_id": str(user.id)})
         return user
 
-    except JWTError:
+    except ExpiredSignatureError:
+        logger.warning("auth_token_expired", extra={"path": request.url.path})
         if required:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise _auth_error("TOKEN_EXPIRED", "Token expired")
+        return None
+    except JWTError:
+        logger.warning("auth_token_invalid", extra={"path": request.url.path})
+        if required:
+            raise _auth_error("INVALID_TOKEN", "Invalid token")
         return None
 
 

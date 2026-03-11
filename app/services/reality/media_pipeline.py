@@ -1,13 +1,15 @@
 import os
 import tempfile
 from hashlib import sha256
+from pathlib import Path
 from typing import Callable, Tuple
 
 from fastapi import HTTPException, UploadFile, status
 
 
 def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int, str]:
-    fd, path = tempfile.mkstemp(prefix="gosuraksha_media_", suffix=".bin")
+    suffix = Path(file.filename or "").suffix or ".bin"
+    fd, path = tempfile.mkstemp(prefix="gosuraksha_media_", suffix=suffix)
     size = 0
     hash_ctx = sha256()
     try:
@@ -36,6 +38,7 @@ def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int, str]:
 def process_upload(
     file: UploadFile,
     allowed_mimes: set,
+    allowed_extensions: set[str],
     max_size: int,
     magic_check: Callable[[bytes], bool],
 ) -> Tuple[str, int, str, str]:
@@ -43,6 +46,9 @@ def process_upload(
         raise HTTPException(status_code=400, detail="No file provided")
     mime = (file.content_type or "").lower()
     if mime not in allowed_mimes:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     path, size, file_hash = _write_temp(file, max_size)

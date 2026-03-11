@@ -75,6 +75,15 @@ def _seconds_until_utc_month_end() -> int:
     return max(1, int((next_month - now).total_seconds()) + 1)
 
 
+def _bucket_for_period(period: str) -> tuple[str, int]:
+    normalized = str(period).strip().lower()
+    if normalized == "day":
+        return datetime.now(timezone.utc).strftime("%Y%m%d"), _seconds_until_utc_day_end()
+    if normalized == "month":
+        return datetime.now(timezone.utc).strftime("%Y%m"), _seconds_until_utc_month_end()
+    raise ValueError(f"Unsupported limit period: {period}")
+
+
 def _allow_window_limit_atomic(key: str, limit: int, ttl_seconds: int) -> bool:
     redis = get_redis()
     script = """
@@ -157,6 +166,62 @@ def consume_sliding_window(
     pipe.expire(key, window_seconds + 5)
     pipe.execute()
     return True, int(current or 0) + 1
+
+
+def consume_period_limit(
+    namespace: str,
+    limit: int,
+    period: str,
+    *parts: Any,
+) -> tuple[bool, int]:
+    redis = get_redis()
+    bucket, ttl_seconds = _bucket_for_period(period)
+    key = build_hashed_key(namespace, *parts, bucket)
+    script = """
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    local limit = tonumber(ARGV[2])
+    if current >= limit then
+        return {0, current}
+    end
+
+    current = redis.call('INCR', KEYS[1])
+    if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+    end
+    return {1, current}
+    """
+    result = redis.eval(script, 1, key, int(ttl_seconds), int(limit))
+    allowed = bool(int(result[0] or 0))
+    count = int(result[1] or 0)
+    return allowed, count
+
+
+def consume_scan_limit(
+    user_id: str,
+    scan_type: str,
+    limit: int,
+    period: str,
+) -> tuple[bool, int]:
+    redis = get_redis()
+    bucket, ttl_seconds = _bucket_for_period(period)
+    key = f"scan:{user_id}:{scan_type}:{bucket}"
+    script = """
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    local limit = tonumber(ARGV[2])
+    if current >= limit then
+        return {0, current}
+    end
+
+    current = redis.call('INCR', KEYS[1])
+    if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+    end
+    return {1, current}
+    """
+    result = redis.eval(script, 1, key, int(ttl_seconds), int(limit))
+    allowed = bool(int(result[0] or 0))
+    count = int(result[1] or 0)
+    return allowed, count
 
 
 def get_json(namespace: str, *parts: Any) -> dict[str, Any] | None:

@@ -11,9 +11,6 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("OTP_SECRET_SALT", "test-salt")
-os.environ.setdefault("IMAGE_AI_DETECT_URL", "http://localhost/image")
-os.environ.setdefault("VOICE_DEEPFAKE_URL", "http://localhost/audio")
-os.environ.setdefault("VIDEO_DEEPFAKE_URL", "http://localhost/video")
 
 from app.main import app
 from app.routes import auth, scan_base
@@ -121,6 +118,15 @@ class FakeRedis:
 
     def eval(self, script, key_count, key, ttl_seconds, limit):
         self._is_expired(key)
+        if "return {1, current}" in script:
+            current = int(self.values.get(key, 0))
+            if current >= int(limit):
+                return [0, current]
+            current += 1
+            self.values[key] = current
+            self.expiry[key] = time.time() + int(ttl_seconds)
+            return [1, current]
+
         current = int(self.values.get(key, 0)) + 1
         self.values[key] = current
         self.expiry[key] = time.time() + int(ttl_seconds)
@@ -131,7 +137,7 @@ class StubDetector:
     def __init__(self, probability):
         self.probability = probability
 
-    async def detect(self, file_path, mime_type):
+    async def detect(self, file_path, mime_type, filename=None, fast_mode=False):
         return {"probability": self.probability, "provider_used": "stub-provider"}
 
 
@@ -169,6 +175,13 @@ def token_users():
             name="Pro User",
             plan="GO_PRO",
             token="pro-token",
+        ),
+        "ultra-token": SimpleNamespace(
+            id=uuid.uuid4(),
+            email="ultra@example.com",
+            name="Ultra User",
+            plan="GO_ULTRA",
+            token="ultra-token",
         ),
     }
 

@@ -68,8 +68,8 @@ def test_free_plan_limit_is_enforced_with_structured_error(client, monkeypatch):
 
     monkeypatch.setattr(
         scan_base,
-        "check_rate_limit",
-        lambda namespace, limit, window_seconds, *keys: RateLimitResult(allowed=False, count=limit, limit=limit),
+        "check_scan_limit",
+        lambda user_id, scan_type, limit, period: RateLimitResult(allowed=False, count=limit, limit=limit),
     )
 
     response = client.post(
@@ -86,7 +86,7 @@ def test_free_plan_limit_is_enforced_with_structured_error(client, monkeypatch):
     }
 
 
-def test_go_pro_bypasses_scan_limits(client, monkeypatch):
+def test_threat_scans_remain_unlimited(client, monkeypatch):
     import app.routes.scan_base as scan_base
 
     calls = {"count": 0}
@@ -95,11 +95,12 @@ def test_go_pro_bypasses_scan_limits(client, monkeypatch):
         calls["count"] += 1
         return RateLimitResult(allowed=False, count=999, limit=1)
 
+    monkeypatch.setattr(scan_base, "check_scan_limit", deny)
     monkeypatch.setattr(scan_base, "check_rate_limit", deny)
 
     response = client.post(
         "/scan/threat",
-        headers=_headers("pro-token"),
+        headers=_headers("free-token"),
         json={"text": "Normal message"},
     )
 
@@ -172,16 +173,16 @@ def test_middleware_returns_structured_error_and_request_id(client, caplog, monk
 def test_scan_limit_check_logs_include_plan_endpoint_and_decision(client, caplog):
     caplog.set_level(logging.INFO)
     response = client.post(
-        "/scan/threat",
+        "/scan/password",
         headers=_headers("pro-token"),
-        json={"text": "hello"},
+        json={"password": "hello"},
     )
 
     assert response.status_code == 200
     matching = [
         record
         for record in caplog.records
-        if "scan_limit_check" in record.getMessage() and getattr(record, "endpoint", None) == "/scan/threat"
+        if "scan_limit_check" in record.getMessage() and getattr(record, "scan_type", None) == "password"
     ]
     assert matching
     assert getattr(matching[0], "plan", None) == "GO_PRO"

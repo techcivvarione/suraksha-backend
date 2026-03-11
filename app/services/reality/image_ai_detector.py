@@ -1,12 +1,19 @@
 from typing import Dict
 
-from app.services.reality.providers.base_provider import RealityDetectionError
-from app.services.reality.providers.reality_defender_provider import build_reality_defender_provider
+from app.services.reality_detection import RealityDetectionEngine
+from app.services.reality_detection.engine import RealityDetectionError
 
 
 class ImageAIDetector:
     def __init__(self, timeout: float = 15.0):
-        self.provider = build_reality_defender_provider("image", timeout=timeout)
+        self.engine = RealityDetectionEngine()
 
-    async def detect(self, file_path: str, mime_type: str) -> Dict[str, float]:
-        return await self.provider.detect(file_path, mime_type)
+    async def detect(self, file_path: str, mime_type: str, filename: str | None = None, fast_mode: bool = False) -> Dict[str, float]:
+        outcome = self.engine.analyze_image(file_path, mime_type, fast_mode=fast_mode)
+        return {
+            "probability": outcome.ai_probability,
+            "provider_used": "internal-hybrid",
+            "signals": outcome.signals,
+            "risk_score": outcome.risk_score,
+            "risk_level": outcome.risk_level,
+        }

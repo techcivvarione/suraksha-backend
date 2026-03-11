@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 
 class ScanResponse(BaseModel):
+    success: bool = True
     scan_id: uuid.UUID
     analysis_type: str
     risk_score: int
@@ -12,6 +13,9 @@ class ScanResponse(BaseModel):
     confidence: Optional[float] = None
     reasons: List[str]
     recommendation: str
+    ai_probability: Optional[float] = None
+    risk: Optional[str] = None
+    signals: Optional[List[str]] = None
     detected_type: Optional[str] = None
     original_payload: Optional[str] = None
     reputation_scan_count: Optional[int] = None

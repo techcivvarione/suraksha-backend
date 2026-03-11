@@ -14,6 +14,10 @@ def test_valid_image_upload(client, auth_token):
     assert resp.status_code == 200
     data = resp.json()
     assert data["analysis_type"] == "REALITY_IMAGE"
+    assert "risk_score" in data
+    assert "risk_level" in data
+    assert "reasons" in data
+    assert "recommendation" in data
 
 
 def test_invalid_mime_image(client, auth_token):

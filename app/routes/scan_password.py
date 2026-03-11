@@ -35,6 +35,8 @@ def scan_password(
         user_limit=20,
         ip_namespace="scan:password:ip",
         ip_limit=60,
+        plan_limit_policy="plan_quota",
+        scan_type="password",
     )
 
     try:
