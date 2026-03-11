@@ -198,6 +198,7 @@ def _resolve_current_user(
                 raise HTTPException(status_code=401, detail="Session expired")
 
         user = maybe_auto_downgrade_expired_subscription(db=db, user=user, request=request)
+        request.state.user = user
         return user
 
     except JWTError:

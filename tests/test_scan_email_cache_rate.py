@@ -29,21 +29,28 @@ def test_repeated_scan_uses_cache(client, auth_token, monkeypatch):
 
 
 def test_email_rate_limit(client, auth_token, monkeypatch):
+    from app.routes import scan_base
     from app.services.email import email_analyzer
+    from app.services.rate_limit import RateLimitResult
+
     monkeypatch.setattr(email_analyzer.HIBPProvider, "lookup", lambda self, email: {"breach_count": 0})
-    resp1 = client.post(
+
+    calls = {"count": 0}
+
+    def fake_check(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return RateLimitResult(allowed=False, count=50, limit=50)
+        return RateLimitResult(allowed=True, count=1, limit=120)
+
+    monkeypatch.setattr(scan_base, "check_rate_limit", fake_check)
+
+    resp = client.post(
         "/scan/email",
         headers={"Authorization": f"Bearer {auth_token}"},
         json={"email": "ratelimit@example.com"},
     )
-    assert resp1.status_code == 200
-    # trigger cooldown same email
-    resp2 = client.post(
-        "/scan/email",
-        headers={"Authorization": f"Bearer {auth_token}"},
-        json={"email": "ratelimit@example.com"},
-    )
-    assert resp2.status_code == 429
+    assert resp.status_code == 429
 
 
 def test_email_normalization(client, auth_token, monkeypatch):

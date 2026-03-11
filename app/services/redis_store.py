@@ -129,6 +129,16 @@ def allow_sliding_window(
     window_seconds: int,
     *parts: Any,
 ) -> bool:
+    allowed, _ = consume_sliding_window(namespace, limit, window_seconds, *parts)
+    return allowed
+
+
+def consume_sliding_window(
+    namespace: str,
+    limit: int,
+    window_seconds: int,
+    *parts: Any,
+) -> tuple[bool, int]:
     redis = get_redis()
     key = build_hashed_key(namespace, *parts)
     now_ms = int(time.time() * 1000)
@@ -139,14 +149,14 @@ def allow_sliding_window(
     pipe.zcard(key)
     _, current = pipe.execute()
     if int(current or 0) >= limit:
-        return False
+        return False, int(current or 0)
 
     member = f"{now_ms}:{uuid.uuid4().hex}"
     pipe = redis.pipeline()
     pipe.zadd(key, {member: now_ms})
     pipe.expire(key, window_seconds + 5)
     pipe.execute()
-    return True
+    return True, int(current or 0) + 1
 
 
 def get_json(namespace: str, *parts: Any) -> dict[str, Any] | None:

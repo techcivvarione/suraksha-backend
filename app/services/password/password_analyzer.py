@@ -1,10 +1,10 @@
 from app.enums.scan_type import ScanType
-from app.services.password.hibp_checker import check_password_pwned
+from app.services.password import hibp_checker
 from app.services.risk_mapper import map_breach_count_to_risk
 
 
 def analyze_password(password: str) -> dict:
-    count = check_password_pwned(password)
+    count = hibp_checker.check_password_pwned(password)
     risk = map_breach_count_to_risk(count)
     reasons = (
         ["Password found in breach database {} times".format(count)]

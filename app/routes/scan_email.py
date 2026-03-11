@@ -1,17 +1,25 @@
+import logging
 import hashlib
 import unicodedata
 from fastapi import APIRouter, Depends, HTTPException, Request
 from email_validator import EmailNotValidError, validate_email
 
-from app.routes.scan_base import require_user, apply_rate_limit, generate_scan_id
+from app.core.features import normalize_plan
+from app.routes.scan_base import (
+    apply_scan_rate_limits,
+    generate_scan_id,
+    is_unlimited_scan_plan,
+    raise_scan_error,
+    require_user,
+)
 from app.schemas.scan_email import EmailScanRequest
-from app.services.email.email_analyzer import analyze_email
+from app.services.email import email_analyzer
 from app.services.response_builder import build_scan_response
 from app.services.scan_logger import log_scan_event
 from app.enums.scan_type import ScanType
-from app.services.redis_store import acquire_cooldown
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/email")
@@ -35,22 +43,28 @@ def scan_email(
 
     scan_id = generate_scan_id()
     client_ip = request.client.host or "unknown"
+    plan = normalize_plan(getattr(current_user, "plan", None))
 
-    apply_rate_limit("scan:email:user", 50, 3600, str(current_user.id))
-    apply_rate_limit("scan:email:ip", 120, 3600, client_ip)
+    apply_scan_rate_limits(
+        current_user=current_user,
+        endpoint="/scan/email",
+        client_ip=client_ip,
+        user_namespace="scan:email:user",
+        user_limit=50,
+        ip_namespace="scan:email:ip",
+        ip_limit=120,
+    )
+
     try:
-        email_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        if not acquire_cooldown("scan:email:cooldown", 60, str(current_user.id), email_hash):
-            raise HTTPException(status_code=429, detail="Please wait before rescanning this email")
+        result = email_analyzer.analyze_email(normalized, user_plan=plan)
     except HTTPException:
         raise
     except Exception:
-        # fail closed on redis errors
-        raise HTTPException(status_code=429, detail="Rate limited")
-
-    user_plan = (current_user.plan or "FREE").upper()
-    is_paid_user = user_plan in {"GO_PRO", "GO_ULTRA"}
-    result = analyze_email(normalized, user_plan=user_plan)
+        logger.exception(
+            "scan_processing_failed",
+            extra={"user_id": str(current_user.id), "plan": plan, "endpoint": "/scan/email"},
+        )
+        raise_scan_error(500, "SCAN_PROCESSING_ERROR", "Scan could not be completed.")
 
     base_response = {
         "analysis_type": ScanType.EMAIL.value,
@@ -61,7 +75,7 @@ def scan_email(
         "confidence": result["confidence"],
         "breach_count": result.get("breach_count"),
     }
-    if is_paid_user:
+    if is_unlimited_scan_plan(current_user):
         base_response["breaches"] = result.get("breaches")
 
     response = build_scan_response(
@@ -74,6 +88,8 @@ def scan_email(
         user_id=str(current_user.id),
         scan_type=ScanType.EMAIL.value,
         risk_score=result["risk_score"],
+        endpoint="/scan/email",
+        plan=plan,
     )
 
     return response

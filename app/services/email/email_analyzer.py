@@ -25,7 +25,10 @@ def analyze_email(email: str, user_plan: str = "FREE") -> dict:
     normalized = _normalize_email(email)
     cache_key = _cache_key(normalized)
 
-    cached = get_json("email_breach", cache_key)
+    try:
+        cached = get_json("email_breach", cache_key)
+    except RedisError:
+        cached = None
     breaches = None
     if cached:
         breach_count = cached.get("breach_count", 0)

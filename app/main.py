@@ -3,8 +3,11 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -20,10 +23,46 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+def _is_scan_path(path: str) -> bool:
+    return path.startswith("/scan")
+
+
+def _scan_error_payload(exc: HTTPException) -> dict:
+    if isinstance(exc.detail, dict):
+        return exc.detail
+    message = str(exc.detail)
+    if exc.status_code == 429:
+        return {"success": False, "error": "SCAN_LIMIT_REACHED", "message": message}
+    if exc.status_code >= 500:
+        return {"success": False, "error": "SCAN_PROCESSING_ERROR", "message": message}
+    return {"success": False, "error": "SCAN_BAD_REQUEST", "message": message}
+
 app = FastAPI(
     title="GO Suraksha API",
     version="1.0.0",
 )
+
+
+@app.exception_handler(HTTPException)
+async def scan_http_exception_handler(request: Request, exc: HTTPException):
+    if _is_scan_path(request.url.path):
+        return JSONResponse(status_code=exc.status_code, content=_scan_error_payload(exc))
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def scan_validation_exception_handler(request: Request, exc: RequestValidationError):
+    if _is_scan_path(request.url.path):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "SCAN_BAD_REQUEST",
+                "message": "Invalid scan request.",
+            },
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 from app.middleware.security import SecurityLoggingMiddleware
 app.add_middleware(SecurityLoggingMiddleware)

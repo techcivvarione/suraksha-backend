@@ -3,9 +3,12 @@ import uuid
 import logging
 from typing import Callable
 
+from fastapi import HTTPException
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
+
+from app.routes.scan_base import build_scan_error
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,10 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
     - Never crashes the app
     """
 
+    @staticmethod
+    def _is_scan_path(path: str) -> bool:
+        return path.startswith("/scan")
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         request_id = str(uuid.uuid4())
         start_time = time.time()
@@ -32,7 +39,7 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             status_code = response.status_code
         except Exception as exc:
-            status_code = 500
+            status_code = getattr(exc, "status_code", 500)
             logger.exception(
                 "request_failed",
                 extra={
@@ -41,7 +48,19 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
                     "method": request.method,
                 },
             )
-            raise exc
+            if self._is_scan_path(request.url.path):
+                if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
+                    payload = exc.detail
+                    status_code = exc.status_code
+                else:
+                    payload = build_scan_error(
+                        "SCAN_PROCESSING_ERROR",
+                        "Scan could not be completed.",
+                    )
+                    status_code = 500
+                response = JSONResponse(status_code=status_code, content=payload)
+            else:
+                raise exc
 
         duration_ms = int((time.time() - start_time) * 1000)
 
