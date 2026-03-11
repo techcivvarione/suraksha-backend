@@ -3,11 +3,38 @@ import logging
 
 from fastapi import Depends, HTTPException
 
-from app.core.features import TIER_PRO, TIER_ULTRA, normalize_plan
+from app.core.features import TIER_FREE, TIER_PRO, TIER_ULTRA, normalize_plan
 from app.routes.auth import get_current_user
-from app.services.rate_limit import RateLimitError, check_rate_limit, enforce_rate_limit
+from app.services.rate_limit import RateLimitError, check_rate_limit, check_scan_limit, enforce_rate_limit
 
 logger = logging.getLogger(__name__)
+
+
+def _log_scan_limit_check(
+    *,
+    user_id: str,
+    scan_type: str | None,
+    plan: str,
+    count: int,
+    limit,
+    allowed: bool,
+    endpoint: str | None = None,
+    scope: str | None = None,
+) -> None:
+    logger.info(
+        "scan_limit_check",
+        extra={
+            "scan_event": "scan_limit_check",
+            "user_id": user_id,
+            "scan_type": scan_type,
+            "plan": plan,
+            "count": count,
+            "limit": limit,
+            "allowed": allowed,
+            "endpoint": endpoint,
+            "scope": scope,
+        },
+    )
 
 
 def require_user(user=Depends(get_current_user)):
@@ -33,7 +60,7 @@ def raise_scan_error(status_code: int, error: str, message: str) -> None:
 
 
 def is_unlimited_scan_plan(user) -> bool:
-    return normalize_plan(getattr(user, "plan", None)) in {TIER_PRO, TIER_ULTRA}
+    return normalize_plan(getattr(user, "plan", None)) == TIER_ULTRA
 
 
 def apply_rate_limit(namespace: str, limit: int, window_seconds: int, *keys: str):
@@ -52,27 +79,61 @@ def apply_scan_rate_limits(
     user_limit: int,
     ip_namespace: str,
     ip_limit: int,
+    plan_limit_policy: str | None = None,
+    scan_type: str | None = None,
 ) -> None:
     user_id = str(current_user.id)
     plan = normalize_plan(getattr(current_user, "plan", None))
 
-    if is_unlimited_scan_plan(current_user):
-        logger.info(
-            "scan_limit_check user=%s plan=%s endpoint=%s allowed=true scan_count=%s limit=%s",
-            user_id,
-            plan,
-            endpoint,
-            0,
-            "unlimited",
-            extra={
-                "scan_event": "scan_limit_check",
-                "user_id": user_id,
-                "plan": plan,
-                "endpoint": endpoint,
-                "allowed": True,
-                "scan_count": 0,
-                "limit": None,
-            },
+    if plan_limit_policy == "plan_quota":
+        resolved_scan_type = scan_type or endpoint.strip("/").replace("/", "_")
+        if is_unlimited_scan_plan(current_user):
+            _log_scan_limit_check(
+                user_id=user_id,
+                scan_type=resolved_scan_type,
+                plan=plan,
+                count=0,
+                limit=None,
+                allowed=True,
+                endpoint=endpoint,
+            )
+            return
+
+        if plan == TIER_PRO:
+            limit = 3
+            period = "day"
+        else:
+            limit = 1
+            period = "month"
+
+        try:
+            result = check_scan_limit(user_id, resolved_scan_type, limit, period)
+        except RateLimitError:
+            raise_scan_error(503, "SCAN_LIMIT_CHECK_FAILED", "Scan limit check is temporarily unavailable.")
+
+        _log_scan_limit_check(
+            user_id=user_id,
+            scan_type=resolved_scan_type,
+            plan=plan,
+            count=result.count,
+            limit=result.limit,
+            allowed=result.allowed,
+            endpoint=endpoint,
+        )
+        if not result.allowed:
+            message = "Free scan limit reached." if plan == TIER_FREE else "Daily scan limit reached."
+            raise_scan_error(429, "SCAN_LIMIT_REACHED", message)
+        return
+
+    if plan in {TIER_PRO, TIER_ULTRA}:
+        _log_scan_limit_check(
+            user_id=user_id,
+            scan_type=scan_type or endpoint.strip("/").replace("/", "_"),
+            plan=plan,
+            count=0,
+            limit=None,
+            allowed=True,
+            endpoint=endpoint,
         )
         return
 
@@ -85,25 +146,15 @@ def apply_scan_rate_limits(
         except RateLimitError:
             raise_scan_error(503, "SCAN_LIMIT_CHECK_FAILED", "Scan limit check is temporarily unavailable.")
 
-        logger.info(
-            "scan_limit_check user=%s plan=%s endpoint=%s scope=%s allowed=%s scan_count=%s limit=%s",
-            user_id,
-            plan,
-            endpoint,
-            scope,
-            result.allowed,
-            result.count,
-            result.limit,
-            extra={
-                "scan_event": "scan_limit_check",
-                "user_id": user_id,
-                "plan": plan,
-                "endpoint": endpoint,
-                "scope": scope,
-                "allowed": result.allowed,
-                "scan_count": result.count,
-                "limit": result.limit,
-            },
+        _log_scan_limit_check(
+            user_id=user_id,
+            scan_type=scan_type or endpoint.strip("/").replace("/", "_"),
+            plan=plan,
+            count=result.count,
+            limit=result.limit,
+            allowed=result.allowed,
+            endpoint=endpoint,
+            scope=scope,
         )
         if not result.allowed:
             message = (
