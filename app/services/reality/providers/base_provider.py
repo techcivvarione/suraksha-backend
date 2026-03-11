@@ -3,7 +3,18 @@ from typing import Dict
 
 
 class RealityDetectionError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str = "unknown",
+        status_code: int | None = None,
+        response_body: str | None = None,
+    ):
+        super().__init__(message)
+        self.provider = provider
+        self.status_code = status_code
+        self.response_body = response_body
 
 
 class BaseRealityProvider(ABC):

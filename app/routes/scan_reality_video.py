@@ -53,7 +53,17 @@ async def scan_reality_video(
 
         try:
             detection = await video_detector.detect(path, mime)
-        except RealityDetectionError:
+        except RealityDetectionError as exc:
+            if exc.provider == "hive":
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "success": False,
+                        "error": "AI_PROVIDER_ERROR",
+                        "provider": "hive",
+                        "message": "AI detection service returned an error",
+                    },
+                )
             raise_scan_error(500, "SCAN_PROCESSING_ERROR", "Scan could not be completed.")
         probability = detection.get("probability", 0.0)
         provider_used = detection.get("provider_used", "unknown")
