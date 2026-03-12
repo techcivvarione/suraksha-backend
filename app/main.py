@@ -8,6 +8,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from app.services.firebase_service import send_push_notification
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -43,6 +44,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
+@app.get("/test-push")
+def test_push():
+    token = "cW1sC2v-Rey102KHZL8uIJ:APA91bHrtVzBC92BuwtJ6g9YxzdpsEcNP3z2wU5qoffnTcwct286BMrjD5wqTM9YQ4O6U6HsrWlXQLLCcg1kHxJHLrk-ZjZ4HKVgNMOOoktZF-GMSfBIXag"
+
+    send_push_notification(
+        token=token,
+        title="GO Suraksha Test",
+        body="Push notifications working 🚀"
+    )
+
+    return {"status": "push_sent"}
 
 @app.exception_handler(HTTPException)
 async def scan_http_exception_handler(request: Request, exc: HTTPException):
