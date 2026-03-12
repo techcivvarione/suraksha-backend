@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,16 +45,22 @@ app = FastAPI(
 )
 
 @app.get("/test-push")
-def test_push():
-    token = "cW1sC2v-Rey102KHZL8uIJ:APA91bHrtVzBC92BuwtJ6g9YxzdpsEcNP3z2wU5qoffnTcwct286BMrjD5wqTM9YQ4O6U6HsrWlXQLLCcg1kHxJHLrk-ZjZ4HKVgNMOOoktZF-GMSfBIXag"
-
-    send_push_notification(
-        token=token,
-        title="GO Suraksha Test",
-        body="Push notifications working 🚀"
-    )
-
-    return {"status": "push_sent"}
+def test_push(token: str = Query(..., min_length=20)):
+    try:
+        message_id = send_push_notification(
+            token=token,
+            title="GO Suraksha Test",
+            body="Push notifications working",
+        )
+        return {
+            "status": "push_sent",
+            "message_id": message_id,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": str(exc),
+        }
 
 @app.exception_handler(HTTPException)
 async def scan_http_exception_handler(request: Request, exc: HTTPException):
