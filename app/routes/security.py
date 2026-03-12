@@ -406,6 +406,7 @@ def confirm_scam(
             db=db,
             user=current_user,
             trigger_type="SCAM_CONFIRMED",
+            risk_score=95,
             scan_id=None,
             alert_event_id=event.id,
         )
@@ -537,6 +538,7 @@ def cyber_emergency(
         db=db,
         user=current_user,
         trigger_type=payload.message or "User triggered Cyber Emergency",
+        risk_score=100,
         scan_id=None,
         alert_event_id=event.id,
         force_trusted=True,

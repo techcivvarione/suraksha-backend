@@ -137,7 +137,7 @@ from app.routes.history import router as history_router
 from app.routes.analyze_ocr import router as analyze_ocr_router
 
 from app.routes.security import router as security_router
-from app.routes.trusted_contacts import router as trusted_contacts_router
+from app.routes.trusted_contacts import router as trusted_contacts_router, legacy_router as trusted_contacts_legacy_router
 from app.routes.trusted import router as trusted_router
 
 from app.routes.alerts import router as alerts_router
@@ -179,6 +179,7 @@ app.include_router(analyze_ocr_router)
 
 app.include_router(security_router)
 app.include_router(trusted_contacts_router)
+app.include_router(trusted_contacts_legacy_router)
 app.include_router(trusted_router)
 
 app.include_router(alerts_router)

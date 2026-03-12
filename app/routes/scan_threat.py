@@ -117,6 +117,7 @@ def scan_threat(
                 db=db,
                 user=current_user,
                 trigger_type="THREAT_HIGH_RISK_SCAN",
+                risk_score=int(result["risk_score"]),
                 scan_id=scan_id,
                 alert_event_id=event.id,
             )

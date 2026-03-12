@@ -329,6 +329,7 @@ def _trigger_realtime_alerts(db: Session, *, job: ScanJob, result: dict) -> None
             db=db,
             user=user,
             trigger_type=f"{job.scan_type.upper()}_HIGH_RISK_SCAN",
+            risk_score=risk_score,
             scan_id=str(job.id),
             alert_event_id=event.id,
         )

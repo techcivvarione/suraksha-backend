@@ -110,45 +110,40 @@ class NotificationService:
         )
         return {"delivery_method": "push", "status": "PENDING_PROVIDER"}
 
-    def send_alert(self, db: Session, user_id: str, media_hash: str, analysis_type: str, risk_score: int):
+    def send_alert(
+        self,
+        db: Session,
+        user_id: str,
+        media_hash: str,
+        analysis_type: str,
+        risk_score: int,
+        *,
+        alert_event_id=None,
+        title: str | None = None,
+        body: str | None = None,
+    ):
         """
-        Best-effort alert delivery to the primary contact.
+        Best-effort alert delivery to the user's registered devices.
         """
-        contact = self._get_primary_contact(db, user_id)
-        if not contact:
-            raise NotificationError("No primary trusted contact")
-
         deliveries = []
-        if contact.get("contact_email"):
-            html_body = (
-                "<p>GO Suraksha detected a high-risk security event.</p>"
-                f"<p>Type: {analysis_type}</p>"
-                f"<p>Risk score: {risk_score}</p>"
-            )
+        for token in self._get_user_device_tokens(db, user_id):
             deliveries.append(
-                self.send_email(
-                    to_email=contact["contact_email"],
-                    subject="GO Suraksha Trusted Alert",
-                    html_body=html_body,
+                self.send_push_notification(
+                    device_token=token,
+                    title=title or "GO Suraksha Alert",
+                    body=body or f"High risk {analysis_type.lower()} detected on your device",
+                    alert_event_id=alert_event_id,
                     user_id=user_id,
                 )
             )
 
-        deliveries.append(
-            self.send_push_notification(
-                db=db,
-                contact_user_id=contact.get("contact_user_id"),
-                title="GO Suraksha Trusted Alert",
-                body=f"{analysis_type} risk score {risk_score}",
-                user_id=user_id,
-            )
-        )
+        if not deliveries:
+            raise NotificationError("No registered device tokens")
 
         logger.info(
-            "notify_primary_contact",
+            "notify_user_devices",
             extra={
                 "user_id": user_id,
-                "contact_id": contact["id"],
                 "media_hash_prefix": media_hash[:8],
                 "analysis_type": analysis_type,
                 "risk_score": risk_score,

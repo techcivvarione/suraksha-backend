@@ -15,6 +15,10 @@ router = APIRouter(
     prefix="/contacts/trusted",
     tags=["Trusted Contacts"],
 )
+legacy_router = APIRouter(
+    prefix="/trusted-contacts",
+    tags=["Trusted Contacts"],
+)
 
 
 class TrustedContactCreate(BaseModel):
@@ -138,6 +142,31 @@ def list_trusted_contacts(
     ).mappings().all()
 
     return {"count": len(rows), "data": rows}
+
+
+@legacy_router.get("/")
+def list_trusted_contacts_legacy(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                name,
+                email,
+                phone,
+                is_primary
+            FROM trusted_contacts
+            WHERE owner_user_id = CAST(:uid AS uuid)
+              AND status = 'ACTIVE'
+            ORDER BY is_primary DESC, created_at DESC
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).mappings().all()
+    return list(rows)
 
 
 @router.delete("/{contact_id}")

@@ -1,9 +1,10 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.models.user import User
 from app.routes.auth import get_current_user
 from app.services.alert_rate_limiter import enforce_alert_limits, AlertRateLimiterError
 from app.services.alert_validator import validate_request_payload, validate_recent_analysis
@@ -13,6 +14,76 @@ from sqlalchemy import text
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("")
+def list_alerts(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                analysis_type,
+                risk_score,
+                created_at,
+                status
+            FROM alert_events
+            WHERE user_id = CAST(:uid AS uuid)
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        ),
+        {"uid": str(current_user.id), "limit": limit, "offset": offset},
+    ).mappings().all()
+
+    alerts = [_build_alert_response(row) for row in rows]
+    return {
+        "count": len(alerts),
+        "limit": limit,
+        "offset": offset,
+        "alerts": alerts,
+    }
+
+
+@router.get("/summary")
+def alert_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                analysis_type,
+                risk_score,
+                created_at,
+                status
+            FROM alert_events
+            WHERE user_id = CAST(:uid AS uuid)
+            ORDER BY created_at DESC
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).mappings().all()
+
+    alerts = [_build_alert_response(row) for row in rows]
+    high_risk = sum(1 for alert in alerts if alert["severity"] == "high")
+    medium_risk = sum(1 for alert in alerts if alert["severity"] == "medium")
+    low_risk = sum(1 for alert in alerts if alert["severity"] == "low")
+
+    return {
+        "total_alerts": len(alerts),
+        "high_risk": high_risk,
+        "medium_risk": medium_risk,
+        "low_risk": low_risk,
+        "latest_alert": alerts[0] if alerts else None,
+    }
 
 
 @router.post("/media-risk", status_code=200)
@@ -76,6 +147,7 @@ def trigger_media_alert(
             db=db,
             user=current_user,
             trigger_type="MEDIA_RISK_ALERT",
+            risk_score=int(payload["risk_score"]),
             scan_id=None,
             alert_event_id=event.id,
         )
@@ -107,3 +179,35 @@ def trigger_media_alert(
         "message": "Alert processed successfully.",
         "dispatch": dispatch,
     }
+
+
+def _build_alert_response(row) -> dict:
+    severity = _severity_for_score(int(row["risk_score"]))
+    title = _title_for_alert(str(row["analysis_type"]), severity)
+    return {
+        "id": row["id"],
+        "alert_type": str(row["analysis_type"]).upper(),
+        "severity": severity,
+        "title": title,
+        "description": _description_for_alert(str(row["analysis_type"]), int(row["risk_score"]), row["status"]),
+        "created_at": row["created_at"],
+        "related_scan_id": None,
+    }
+
+
+def _severity_for_score(risk_score: int) -> str:
+    if risk_score >= 70:
+        return "high"
+    if risk_score >= 40:
+        return "medium"
+    return "low"
+
+
+def _title_for_alert(alert_type: str, severity: str) -> str:
+    label = alert_type.replace("_", " ").title()
+    return f"{severity.title()} Risk {label}"
+
+
+def _description_for_alert(alert_type: str, risk_score: int, status: str) -> str:
+    label = alert_type.replace("_", " ").lower()
+    return f"{label} triggered with risk score {risk_score}. Status: {status.lower()}."
