@@ -4,15 +4,19 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.features import Feature, has_feature
+from app.services.alert_logging import log_alert_event
+from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
+notifier = NotificationService()
 
 
 def notify_family_head(
     db: Session,
     member_user_id: str,
     scan_id: str,
+    alert_type: str = "HIGH_RISK_FAMILY_ALERT",
+    alert_event_id=None,
 ):
     family_head = db.execute(
         text(
@@ -28,27 +32,7 @@ def notify_family_head(
     ).scalar()
 
     if not family_head:
-        return
-
-    plan = db.execute(
-        text(
-            """
-            SELECT plan FROM users
-            WHERE id = CAST(:uid AS uuid)
-        """
-        ),
-        {"uid": family_head},
-    ).scalar()
-
-    family_ctx = type("FamilyCtx", (), {"plan": plan})()
-    if not has_feature(family_ctx, Feature.FAMILY_ALERTS):
-        logger.info(
-            "feature_access_denied user_id=%s plan=%s feature=%s context=family_alert_insert",
-            family_head,
-            plan,
-            Feature.FAMILY_ALERTS.value,
-        )
-        return
+        return {"stored": 0}
 
     db.execute(
         text(
@@ -65,7 +49,7 @@ def notify_family_head(
                 :family_head,
                 :member,
                 :scan,
-                'HIGH_RISK_FAMILY_ALERT'
+                :alert_type
             )
         """
         ),
@@ -74,7 +58,24 @@ def notify_family_head(
             "family_head": family_head,
             "member": member_user_id,
             "scan": scan_id,
+            "alert_type": alert_type,
         },
     )
 
     db.commit()
+    log_alert_event(
+        alert_event_id=alert_event_id,
+        user_id=str(member_user_id),
+        trigger_type=alert_type,
+        delivery_method="family_dashboard",
+        status="STORED",
+    )
+    notifier.send_push_notification(
+        db=db,
+        contact_user_id=family_head,
+        title=alert_type,
+        body="A family member triggered a security alert.",
+        alert_event_id=alert_event_id,
+        user_id=str(member_user_id),
+    )
+    return {"stored": 1}

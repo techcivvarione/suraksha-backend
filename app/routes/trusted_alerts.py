@@ -43,7 +43,7 @@ def get_trusted_alerts(
               ON ta.contact_id = tc.id
             JOIN users u
               ON tc.owner_user_id = u.id
-            JOIN scan_history sh
+            LEFT JOIN scan_history sh
               ON ta.scan_id = sh.id
             WHERE
                 tc.contact_user_id = CAST(:uid AS uuid)

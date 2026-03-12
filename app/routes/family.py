@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -7,6 +7,7 @@ from app.db import get_db
 from app.dependencies.access import require_feature
 from app.models.user import User
 from app.routes.auth import get_current_user
+from app.services.security_plan_limits import allows_family_alerts
 
 router = APIRouter(prefix="/family", tags=["Family Dashboard"])
 
@@ -16,6 +17,9 @@ def family_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not allows_family_alerts(current_user.plan):
+        raise HTTPException(status_code=403, detail="Family dashboard is available on GO_ULTRA only")
+
     rows = db.execute(
         text(
             """
@@ -43,6 +47,31 @@ def family_dashboard(
         {"uid": str(current_user.id)},
     ).mappings().all()
 
+    alert_rows = db.execute(
+        text(
+            """
+            SELECT
+                fa.member_user_id,
+                fa.alert_type,
+                fa.created_at
+            FROM family_alerts fa
+            WHERE fa.family_head_user_id = CAST(:uid AS uuid)
+            ORDER BY fa.created_at DESC
+            LIMIT 50
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).mappings().all()
+    alerts_by_member: dict[str, list[dict]] = {}
+    for alert in alert_rows:
+        member_key = str(alert["member_user_id"])
+        alerts_by_member.setdefault(member_key, []).append(
+            {
+                "alert_type": alert["alert_type"],
+                "created_at": alert["created_at"],
+            }
+        )
+
     members = []
 
     for row in rows:
@@ -65,6 +94,7 @@ def family_dashboard(
                 },
                 "total_scans": row["total_scans"],
                 "last_scan_at": row["last_scan_at"],
+                "recent_alerts": alerts_by_member.get(str(row["user_id"]), [])[:5],
             }
         )
 

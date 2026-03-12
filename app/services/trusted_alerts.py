@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.features import Feature, has_feature
-from app.services.email_service import send_email
+from app.services.alert_logging import log_alert_event
+from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
 ALERT_COOLDOWN_MINUTES = 30
+notifier = NotificationService()
 
 
 def build_high_risk_email(owner_name: str, scan_text: str):
@@ -47,42 +48,15 @@ def notify_trusted_contacts(
     user_id: str,
     scan_id: str,
     alert_type: str = "HIGH_RISK_SCAN",
+    alert_event_id=None,
 ):
-    last_alert_time = db.execute(
-        text(
-            """
-            SELECT created_at
-            FROM trusted_alerts
-            WHERE contact_id IN (
-                SELECT id
-                FROM trusted_contacts
-                WHERE owner_user_id = CAST(:uid AS uuid)
-            )
-            ORDER BY created_at DESC
-            LIMIT 1
-        """
-        ),
-        {"uid": user_id},
-    ).scalar()
-
-    if last_alert_time:
-        if last_alert_time.tzinfo is None:
-            last_alert_time = last_alert_time.replace(tzinfo=timezone.utc)
-
-        now = datetime.now(timezone.utc)
-
-        if now - last_alert_time < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
-            logger.info("Trusted alert skipped due to cooldown")
-            return
-
     contacts = db.execute(
         text(
             """
-            SELECT id, contact_email
+            SELECT id, contact_email, contact_user_id
             FROM trusted_contacts
             WHERE owner_user_id = CAST(:uid AS uuid)
               AND status = 'ACTIVE'
-              AND contact_email IS NOT NULL
         """
         ),
         {"uid": user_id},
@@ -90,9 +64,31 @@ def notify_trusted_contacts(
 
     if not contacts:
         logger.info("No active trusted contacts with email")
-        return
+        return {"stored": 0, "delivered": 0}
 
+    stored = 0
+    delivered = 0
     for contact in contacts:
+        last_alert_time = db.execute(
+            text(
+                """
+                SELECT created_at
+                FROM trusted_alerts
+                WHERE contact_id = CAST(:contact_id AS uuid)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"contact_id": str(contact["id"])},
+        ).scalar()
+        if last_alert_time:
+            if last_alert_time.tzinfo is None:
+                last_alert_time = last_alert_time.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            if now - last_alert_time < timedelta(minutes=ALERT_COOLDOWN_MINUTES):
+                logger.info("Trusted alert skipped due to cooldown", extra={"contact_id": str(contact["id"])})
+                continue
+
         db.execute(
             text(
                 """
@@ -119,11 +115,19 @@ def notify_trusted_contacts(
                 "alert_type": alert_type,
             },
         )
+        stored += 1
+        log_alert_event(
+            alert_event_id=alert_event_id,
+            user_id=user_id,
+            trigger_type=alert_type,
+            delivery_method="trusted_alerts",
+            status="STORED",
+        )
 
     owner = db.execute(
         text(
             """
-            SELECT name, plan
+            SELECT name
             FROM users
             WHERE id = CAST(:uid AS uuid)
         """
@@ -133,18 +137,7 @@ def notify_trusted_contacts(
 
     if not owner:
         db.commit()
-        return
-
-    owner_ctx = type("OwnerCtx", (), {"plan": owner.plan})()
-    if not has_feature(owner_ctx, Feature.PRIORITY_SOS):
-        logger.info(
-            "feature_access_denied user_id=%s plan=%s feature=%s context=trusted_alert_email",
-            user_id,
-            owner.plan,
-            Feature.PRIORITY_SOS.value,
-        )
-        db.commit()
-        return
+        return {"stored": stored, "delivered": delivered}
 
     owner_name = owner.name or "Your contact"
 
@@ -162,19 +155,43 @@ def notify_trusted_contacts(
     scan_text = scan.input_text if scan else "A high-risk digital threat was detected."
 
     for contact in contacts:
+        if not contact.get("contact_email"):
+            if contact.get("contact_user_id"):
+                notifier.send_push_notification(
+                    db=db,
+                    contact_user_id=contact["contact_user_id"],
+                    title=alert_type,
+                    body=scan_text,
+                    alert_event_id=alert_event_id,
+                    user_id=user_id,
+                )
+            continue
         try:
             html_body = build_high_risk_email(
                 owner_name=owner_name,
                 scan_text=scan_text,
             )
 
-            send_email(
+            notifier.send_email(
                 to_email=contact["contact_email"],
                 subject="High-Risk Security Alert - GO Suraksha",
                 html_body=html_body,
+                alert_event_id=alert_event_id,
+                user_id=user_id,
             )
+            delivered += 1
+            if contact.get("contact_user_id"):
+                notifier.send_push_notification(
+                    db=db,
+                    contact_user_id=contact["contact_user_id"],
+                    title=alert_type,
+                    body=scan_text,
+                    alert_event_id=alert_event_id,
+                    user_id=user_id,
+                )
 
         except Exception as exc:
             logger.error("Email failed for %s: %s", contact["contact_email"], exc)
 
     db.commit()
+    return {"stored": stored, "delivered": delivered}

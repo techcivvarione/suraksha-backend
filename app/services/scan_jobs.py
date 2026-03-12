@@ -14,12 +14,16 @@ from sqlalchemy.orm import Session
 from app.db import engine
 from app.enums.scan_type import ScanType
 from app.models.scan_job import ScanJob
+from app.models.user import User
+from app.services.alert_rate_limiter import AlertRateLimiterError, enforce_alert_limits
 from app.services.ai_explainer import generate_ai_explanation
 from app.services.ocr_service import OCRException, extract_text_from_image
 from app.services.reality.image_ai_detector import ImageAIDetector
 from app.services.reality.video_deepfake_detector import VideoDeepfakeDetector
 from app.services.reality.voice_deepfake_detector import VoiceDeepfakeDetector
 from app.services.scan_logger import log_scan_event
+from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
+from app.services.security_plan_limits import allows_realtime_alerts
 from app.services.storage_service import delete_file, download_file
 
 logger = logging.getLogger(__name__)
@@ -116,6 +120,8 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
             job.result_json = payload
             db.add(job)
             _insert_scan_history(db, job=job, result=result)
+
+        _trigger_realtime_alerts(db, job=job, result=result)
 
         log_scan_event(
             scan_id=job.id,
@@ -298,3 +304,38 @@ def _extension_for(file_key: str, scan_type: str) -> str:
     if extension:
         return extension
     return next(iter(_SCAN_TYPE_TO_MIME[scan_type].keys()))
+
+
+def _trigger_realtime_alerts(db: Session, *, job: ScanJob, result: dict) -> None:
+    risk_score = int(result.get("risk_score") or 0)
+    if risk_score < 70:
+        return
+
+    user = db.query(User).filter(User.id == job.user_id).first()
+    if not user or not allows_realtime_alerts(user.plan):
+        return
+
+    try:
+        enforce_alert_limits(db, str(user.id), None, None)
+        event = create_alert_event(
+            db=db,
+            user_id=user.id,
+            trigger_type=f"{job.scan_type.upper()}_HIGH_RISK_SCAN",
+            analysis_type=job.scan_type.upper(),
+            risk_score=risk_score,
+            media_hash=str(job.id).replace("-", ""),
+        )
+        dispatch_plan_alerts(
+            db=db,
+            user=user,
+            trigger_type=f"{job.scan_type.upper()}_HIGH_RISK_SCAN",
+            scan_id=str(job.id),
+            alert_event_id=event.id,
+        )
+        event.status = "SENT"
+        db.add(event)
+        db.commit()
+    except AlertRateLimiterError:
+        logger.info("scan_job_realtime_alert_rate_limited", extra={"job_id": str(job.id), "user_id": str(job.user_id)})
+    except Exception:
+        logger.exception("scan_job_realtime_alert_failed", extra={"job_id": str(job.id), "user_id": str(job.user_id)})

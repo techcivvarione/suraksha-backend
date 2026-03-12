@@ -92,10 +92,12 @@ def startup():
     logger.info("GO Suraksha API starting up")
 
     from app.services.reality_detection.engine import validate_runtime_dependencies
+    from app.services.device_service import ensure_user_devices_table
     from app.services.scan_jobs import ensure_scan_jobs_table
 
     validate_runtime_dependencies()
     ensure_scan_jobs_table()
+    ensure_user_devices_table()
 
     try:
         from app.services.news_ingestor import ingest_rss
@@ -143,6 +145,7 @@ from app.routes.scan_reality_image import router as scan_reality_image_router
 from app.routes.scan_reality_video import router as scan_reality_video_router
 from app.routes.scan_reality_audio import router as scan_reality_audio_router
 from app.routes.scan_results import router as scan_results_router
+from app.routes.devices import router as devices_router
 from app.routes.billing import router as billing_router
 from app.routes.webhooks import router as webhooks_router
 
@@ -183,6 +186,7 @@ app.include_router(scan_reality_image_router)
 app.include_router(scan_reality_video_router)
 app.include_router(scan_reality_audio_router)
 app.include_router(scan_results_router)
+app.include_router(devices_router)
 app.include_router(billing_router)
 app.include_router(webhooks_router)
 

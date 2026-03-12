@@ -6,10 +6,10 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.features import Feature, get_feature_limit
 from app.db import get_db
 from app.models.user import User
 from app.routes.auth import get_current_user
+from app.services.security_plan_limits import get_contact_limit
 
 router = APIRouter(
     prefix="/contacts/trusted",
@@ -48,16 +48,16 @@ def add_trusted_contact(
         {"uid": str(current_user.id)},
     ).scalar()
 
-    max_allowed = get_feature_limit(current_user, Feature.TRUSTED_CONTACT_LIMIT) or 1
+    max_allowed = get_contact_limit(current_user.plan)
 
     if current_count >= max_allowed:
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "PLAN_LIMIT_REACHED",
-                "message": f"Your plan allows only {max_allowed} trusted contact(s)",
+                "message": "Trusted contact limit reached for your plan",
                 "plan": current_user.plan,
-                "upgrade_required": max_allowed == 1,
+                "upgrade_required": True,
             },
         )
 

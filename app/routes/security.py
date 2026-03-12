@@ -12,7 +12,10 @@ from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.models.scam_report import ScamReport
 from app.routes.auth import get_current_user, verify_password, hash_password
+from app.services.alert_rate_limiter import AlertRateLimiterError, enforce_alert_limits
 from app.services.audit_logger import create_audit_log
+from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
+from app.services.security_plan_limits import allows_family_alerts
 from app.services.evidence_exporter import generate_evidence_bundle
 from app.services.cyber_complaint_generator import generate_cyber_complaint_text
 
@@ -52,6 +55,10 @@ class CyberSOSRequest(BaseModel):
     description: str
     loss_amount: Optional[str] = None
     source: Optional[str] = None
+
+
+class CyberEmergencyRequest(BaseModel):
+    message: Optional[str] = "User triggered Cyber Emergency"
 
 
 # =========================================================
@@ -387,20 +394,20 @@ def confirm_scam(
 
     # 4️⃣ Notify trusted + family (best-effort)
     try:
-        from app.services.trusted_alerts import notify_trusted_contacts
-        from app.services.family_alerts import notify_family_head
-
-        notify_trusted_contacts(
+        enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None)
+        event = create_alert_event(
             db=db,
-            user_id=str(current_user.id),
-            scan_id=None,
-            alert_type="SCAM_CONFIRMED",
+            user_id=current_user.id,
+            trigger_type="SCAM_CONFIRMED",
+            analysis_type="SCAM",
+            risk_score=95,
         )
-
-        notify_family_head(
+        dispatch_plan_alerts(
             db=db,
-            member_user_id=str(current_user.id),
+            user=current_user,
+            trigger_type="SCAM_CONFIRMED",
             scan_id=None,
+            alert_event_id=event.id,
         )
     except Exception:
         pass  # never block confirmation
@@ -503,6 +510,55 @@ def cyber_sos_confirm(
             "Upload screenshots, transaction proof, messages",
             "Change passwords & secure affected accounts"
         ]
+    }
+
+
+@router.post("/cyber-emergency")
+def cyber_emergency(
+    payload: CyberEmergencyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        enforce_alert_limits(db, str(current_user.id), client_ip, None)
+    except AlertRateLimiterError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+
+    event = create_alert_event(
+        db=db,
+        user_id=current_user.id,
+        trigger_type="CYBER_EMERGENCY",
+        analysis_type="SOS",
+        risk_score=100,
+    )
+    dispatch = dispatch_plan_alerts(
+        db=db,
+        user=current_user,
+        trigger_type=payload.message or "User triggered Cyber Emergency",
+        scan_id=None,
+        alert_event_id=event.id,
+        force_trusted=True,
+    )
+
+    event.status = "SENT"
+    db.add(event)
+    db.commit()
+
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        event_type="CYBER_EMERGENCY_TRIGGERED",
+        event_description="User triggered Cyber Emergency",
+        request=request,
+    )
+
+    return {
+        "status": "CYBER_EMERGENCY_TRIGGERED",
+        "message": payload.message or "User triggered Cyber Emergency",
+        "family_alerts_enabled": allows_family_alerts(current_user.plan),
+        "dispatch": dispatch,
     }
 
 
