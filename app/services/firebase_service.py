@@ -1,26 +1,32 @@
 from __future__ import annotations
 
+import json
 import logging
-from pathlib import Path
+import os
 
 import firebase_admin
 from firebase_admin import credentials, messaging
 
 logger = logging.getLogger(__name__)
 
-_SERVICE_ACCOUNT_PATH = (
-    Path(__file__).resolve().parents[1] / "credentials" / "firebase_service_account.json"
-)
+_SERVICE_ACCOUNT_ENV = "FIREBASE_SERVICE_ACCOUNT_JSON"
 
 
 def _initialize_firebase() -> None:
     if firebase_admin._apps:
         return
-    if not _SERVICE_ACCOUNT_PATH.exists():
+    raw_credentials = os.getenv(_SERVICE_ACCOUNT_ENV, "").strip()
+    if not raw_credentials:
         raise RuntimeError(
-            f"Firebase service account file not found at {_SERVICE_ACCOUNT_PATH}"
+            f"Firebase service account JSON not found in environment variable {_SERVICE_ACCOUNT_ENV}"
         )
-    cred = credentials.Certificate(str(_SERVICE_ACCOUNT_PATH))
+    try:
+        credential_payload = json.loads(raw_credentials)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Invalid Firebase service account JSON in environment variable {_SERVICE_ACCOUNT_ENV}"
+        ) from exc
+    cred = credentials.Certificate(credential_payload)
     firebase_admin.initialize_app(cred)
 
 
