@@ -4,7 +4,8 @@ Illustrative tests; require client/auth fixtures.
 import io
 
 
-def test_valid_image_upload(client, auth_token):
+def test_valid_image_upload(client, auth_token, monkeypatch):
+    monkeypatch.setattr("app.routes.scan_reality_image.upload_file", lambda file_bytes, filename: f"r2/{filename}")
     payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
     resp = client.post(
         "/scan/reality/image",
@@ -13,11 +14,8 @@ def test_valid_image_upload(client, auth_token):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["analysis_type"] == "REALITY_IMAGE"
-    assert "risk_score" in data
-    assert "risk_level" in data
-    assert "reasons" in data
-    assert "recommendation" in data
+    assert data["status"] == "processing"
+    assert "job_id" in data
 
 
 def test_invalid_mime_image(client, auth_token):

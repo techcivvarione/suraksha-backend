@@ -1,5 +1,3 @@
-import os
-import tempfile
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable, Tuple
@@ -7,31 +5,24 @@ from typing import Callable, Tuple
 from fastapi import HTTPException, UploadFile, status
 
 
-def _write_temp(file: UploadFile, max_size: int) -> Tuple[str, int, str]:
-    suffix = Path(file.filename or "").suffix or ".bin"
-    fd, path = tempfile.mkstemp(prefix="gosuraksha_media_", suffix=suffix)
+def _read_upload_bytes(file: UploadFile, max_size: int) -> Tuple[bytes, int, str]:
     size = 0
     hash_ctx = sha256()
     try:
-        with os.fdopen(fd, "wb") as out:
-            while True:
-                chunk = file.file.read(8192)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_size:
-                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
-                out.write(chunk)
-                hash_ctx.update(chunk)
+        chunks: list[bytes] = []
+        while True:
+            chunk = file.file.read(8192)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_size:
+                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+            chunks.append(chunk)
+            hash_ctx.update(chunk)
         if size == 0:
             raise HTTPException(status_code=400, detail="Empty file")
-        return path, size, hash_ctx.hexdigest()
+        return b"".join(chunks), size, hash_ctx.hexdigest()
     except Exception:
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except Exception:
-                pass
         raise
 
 
@@ -41,7 +32,7 @@ def process_upload(
     allowed_extensions: set[str],
     max_size: int,
     magic_check: Callable[[bytes], bool],
-) -> Tuple[str, int, str, str]:
+) -> Tuple[bytes, int, str, str]:
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
     mime = (file.content_type or "").lower()
@@ -51,19 +42,9 @@ def process_upload(
     if extension not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Invalid file type")
 
-    path, size, file_hash = _write_temp(file, max_size)
+    file_bytes, size, file_hash = _read_upload_bytes(file, max_size)
+    header = file_bytes[:16]
+    if not magic_check(header):
+        raise HTTPException(status_code=400, detail="Corrupted or invalid file")
 
-    try:
-        with open(path, "rb") as fh:
-            header = fh.read(16)
-            if not magic_check(header):
-                raise HTTPException(status_code=400, detail="Corrupted or invalid file")
-
-        return path, size, mime, file_hash
-    except Exception:
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-        raise
+    return file_bytes, size, mime, file_hash
