@@ -110,6 +110,7 @@ def startup():
     logger.info("GO Suraksha API starting up")
 
     from app.services.cyber_card import ensure_cyber_card_indexes
+    from app.services.scam_network.schema import ensure_scam_network_tables
     from app.services.user_terms_schema import ensure_user_terms_columns
     from app.services.reality_detection.engine import validate_runtime_dependencies
     from app.services.device_service import ensure_user_devices_table
@@ -118,6 +119,7 @@ def startup():
     validate_runtime_dependencies()
     ensure_user_terms_columns()
     ensure_cyber_card_indexes()
+    ensure_scam_network_tables()
     ensure_scan_jobs_table()
     ensure_user_devices_table()
 
@@ -155,6 +157,7 @@ from app.routes.family import router as family_router
 from app.routes import trusted_alerts
 from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
+from app.routes.scam_network import router as scam_network_router
 from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr_secure import router as qr_secure_router
 from app.routes.media import router as media_router
@@ -197,6 +200,7 @@ app.include_router(family_router)
 app.include_router(trusted_alerts.router)
 app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
+app.include_router(scam_network_router)
 app.include_router(ai_image_router)
 app.include_router(qr_secure_router)
 app.include_router(media_router)

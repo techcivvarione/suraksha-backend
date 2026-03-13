@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from app.routes.auth import get_current_user
+from app.schemas.scam_network import (
+    ScamAlertsResponse,
+    ScamHeatmapResponse,
+    ScamMessageCheckRequest,
+    ScamMessageCheckResponse,
+    ScamNumberCheckRequest,
+    ScamNumberCheckResponse,
+    ScamReportRequest,
+    ScamReportResponse,
+    ScamVerifyCallResponse,
+    TrendingScamsResponse,
+)
+from app.services.scam_network.abuse_guard import ScamNetworkAbuseError
+from app.services.scam_network.aggregation_service import fetch_alerts, fetch_trending_scams, get_number_intelligence
+from app.services.scam_network.heatmap_service import get_heatmap_points
+from app.services.scam_network.message_detection import analyze_message_text
+from app.services.scam_network.normalization import normalize_phone_number
+from app.services.scam_network.report_service import ScamReportService
+
+router = APIRouter(prefix='/scam', tags=['Scam Alert Network'])
+report_service = ScamReportService()
+
+
+@router.post('/report', response_model=ScamReportResponse, summary='Report suspicious scam activity')
+def report_scam(
+    payload: ScamReportRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        result = report_service.create_report(
+            db,
+            current_user=current_user,
+            payload=payload,
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get('user-agent'),
+        )
+    except ScamNetworkAbuseError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+    return ScamReportResponse(
+        status='reported',
+        report_id=str(result.report.id),
+        duplicate=result.duplicate,
+        message='Report recorded as suspicious.' if not result.duplicate else 'Duplicate suspicious report ignored.',
+    )
+
+
+@router.post('/check-number', response_model=ScamNumberCheckResponse, summary='Check whether a phone number was reported as suspicious')
+def check_number(
+    payload: ScamNumberCheckRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    normalized_phone, _ = normalize_phone_number(payload.phone_number)
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail='Invalid phone number')
+    aggregate = get_number_intelligence(db, normalized_phone)
+    if not aggregate:
+        return ScamNumberCheckResponse(
+            suspicion_level='low',
+            report_count_24h=0,
+            report_count_30d=0,
+            message='No user reports found for this number.',
+        )
+    return ScamNumberCheckResponse(
+        suspicion_level=aggregate.risk_level,
+        report_count_24h=aggregate.report_count_24h,
+        report_count_30d=aggregate.report_count_30d,
+        message='This number has been reported by users as suspicious.',
+    )
+
+
+@router.post('/check-message', response_model=ScamMessageCheckResponse, summary='Check a message for phishing patterns')
+def check_message(
+    payload: ScamMessageCheckRequest,
+    current_user=Depends(get_current_user),
+):
+    result = analyze_message_text(payload.message_text)
+    return ScamMessageCheckResponse(
+        risk_score=result['risk_score'],
+        classification=result['classification'],
+        reason=result['reason'],
+    )
+
+
+@router.get('/alerts', response_model=ScamAlertsResponse, summary='List scam alert network events')
+def scam_alerts(
+    state: str | None = Query(None),
+    country: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    alerts, total = fetch_alerts(db, state=state, country=country, limit=limit, offset=offset)
+    return ScamAlertsResponse(alerts=alerts, total=total)
+
+
+@router.get('/heatmap', response_model=ScamHeatmapResponse, summary='Get scam density heatmap points')
+def scam_heatmap(
+    window: str = Query('24h', pattern='^(24h|7d|30d)$'),
+    scope: str = Query('global', pattern='^(nearby|state|country|global)$'),
+    state: str | None = Query(None),
+    country: str | None = Query(None),
+    lat: float | None = Query(None),
+    lng: float | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return ScamHeatmapResponse(points=get_heatmap_points(db, window=window, scope=scope, state=state, country=country, lat=lat, lng=lng))
+
+
+@router.get('/trending', response_model=TrendingScamsResponse, summary='Get trending scam campaigns')
+def scam_trending(
+    window: str = Query('7d', pattern='^(24h|7d|30d)$'),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return TrendingScamsResponse(window=window, items=fetch_trending_scams(db, window=window))
+
+
+@router.post('/verify-call', response_model=ScamVerifyCallResponse, summary='Verify whether an incoming phone number was reported as suspicious')
+def verify_call(
+    payload: ScamNumberCheckRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    normalized_phone, _ = normalize_phone_number(payload.phone_number)
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail='Invalid phone number')
+    aggregate = get_number_intelligence(db, normalized_phone)
+    if not aggregate:
+        return ScamVerifyCallResponse(
+            risk_level='low',
+            reports=0,
+            category=None,
+            message='No suspicious activity reports found for this number.',
+        )
+    return ScamVerifyCallResponse(
+        risk_level=aggregate.risk_level,
+        reports=aggregate.report_count_30d,
+        category=aggregate.top_category,
+        message='Multiple users reported suspicious activity.' if aggregate.report_count_24h >= 5 else 'Reported by users as suspicious.',
+    )
