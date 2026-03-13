@@ -45,3 +45,7 @@ class User(Base):
     preferred_language = Column(String, nullable=False, default="en", server_default="en")
     ai_image_lifetime_used = Column(Integer, nullable=False, default=0, server_default="0")
     first_upgrade_used = Column(Boolean, nullable=False, default=False, server_default="false")
+    accepted_terms = Column(Boolean, nullable=False, default=False, server_default="false")
+    accepted_terms_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version = Column(String, nullable=True)
+    privacy_version = Column(String, nullable=True)

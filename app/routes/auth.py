@@ -21,6 +21,7 @@ from app.db import get_db
 from app.core.features import TIER_FREE
 from app.models.user import User
 from app.models.email_otp import EmailOtp
+from app.schemas.auth import SignupRequest
 from app.services.audit_logger import create_audit_log
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
 from app.services.email_service import send_otp_email
@@ -264,16 +265,6 @@ def _resolve_current_user(
 
 
 # ---------------- REQUEST MODELS ----------------
-class SignupRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    email: Optional[str]
-    phone_number: Optional[str]
-    password: str
-    confirm_password: str
-
-
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -413,6 +404,12 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
 def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"signup:{request.client.host}", db)
 
+    if not payload.accepted_terms:
+        raise HTTPException(
+            status_code=400,
+            detail="You must accept the Privacy Policy and Terms of Service to create an account.",
+        )
+
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
@@ -435,11 +432,24 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         subscription_expires_at=None,
         password_hash=hash_password(payload.password),
         password_changed_at=now,
+        accepted_terms=True,
+        accepted_terms_at=now,
+        terms_version=payload.terms_version or "v1",
+        privacy_version=payload.privacy_version or "v1",
     )
 
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    logger.info(
+        "terms_accepted",
+        extra={
+            "user_email": payload.email,
+            "version": payload.terms_version or "v1",
+            "privacy_version": payload.privacy_version or "v1",
+        },
+    )
 
     if user.email:
         db.execute(
@@ -476,6 +486,15 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             request=request,
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not getattr(user, "accepted_terms", False):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "TERMS_REQUIRED",
+                "message": "You must accept the Privacy Policy and Terms of Service to continue.",
+            },
+        )
 
     token = create_access_token(user)
 
