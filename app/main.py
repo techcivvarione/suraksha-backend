@@ -109,11 +109,13 @@ app.add_middleware(
 def startup():
     logger.info("GO Suraksha API starting up")
 
+    from app.services.cyber_card import ensure_cyber_card_indexes
     from app.services.reality_detection.engine import validate_runtime_dependencies
     from app.services.device_service import ensure_user_devices_table
     from app.services.scan_jobs import ensure_scan_jobs_table
 
     validate_runtime_dependencies()
+    ensure_cyber_card_indexes()
     ensure_scan_jobs_table()
     ensure_user_devices_table()
 

@@ -23,6 +23,17 @@ def list_alerts(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    total = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM alert_events
+            WHERE user_id = CAST(:uid AS uuid)
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).scalar()
+
     rows = db.execute(
         text(
             """
@@ -43,10 +54,9 @@ def list_alerts(
 
     alerts = [_build_alert_response(row) for row in rows]
     return {
-        "count": len(alerts),
-        "limit": limit,
-        "offset": offset,
         "alerts": alerts,
+        "total": int(total or 0),
+        "page": (offset // limit) + 1,
     }
 
 
