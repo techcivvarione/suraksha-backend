@@ -24,7 +24,7 @@ def generate_evidence_bundle(db: Session, user: User):
     scam_reports = (
         db.query(ScamReport)
         .filter(ScamReport.user_id == user.id)
-        .order_by(ScamReport.reported_at.desc())
+        .order_by(ScamReport.created_at.desc())
         .all()
     )
 
@@ -52,12 +52,17 @@ def generate_evidence_bundle(db: Session, user: User):
         "scam_reports": [
             {
                 "id": str(r.id),
-                "scam_type": r.scam_type,
-                "title": r.title,
-                "description": r.description,
-                "source": r.source,
-                "scam_value": r.scam_value,
-                "reported_at": _dt(r.reported_at),
+                "report_type": r.report_type,
+                "category": r.category,
+                "scam_phone_number": r.scam_phone_number,
+                "phishing_url": r.phishing_url,
+                "payment_handle": r.payment_handle,
+                "payment_provider": r.payment_provider,
+                "scam_description": r.scam_description,
+                "status": r.status,
+                "visibility_status": r.visibility_status,
+                "created_at": _dt(r.created_at),
+                "updated_at": _dt(r.updated_at),
             }
             for r in scam_reports
         ],

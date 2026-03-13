@@ -35,17 +35,13 @@ class ScamReportService:
 
         report = ScamReport(
             user_id=current_user.id,
-            scam_type=payload.category,
-            title=f'{payload.report_type.title()} report',
-            description=payload.scam_description,
-            source=payload.phishing_url or payload.scam_phone_number,
             report_type=payload.report_type,
             category=payload.category,
             scam_phone_number=display_phone or payload.scam_phone_number,
             normalized_phone_number=normalized_phone,
             phishing_url=payload.phishing_url,
             normalized_url=normalized_url,
-            payment_handle=normalized_payment_handle,
+            payment_handle=payload.payment_handle,
             payment_provider=payload.payment_provider,
             scam_description=payload.scam_description,
             report_hash=report_hash,
@@ -56,8 +52,6 @@ class ScamReportService:
             country=payload.region.country if payload.region else None,
             status='DUPLICATE' if duplicate else 'REPORTED',
             visibility_status='SUSPICIOUS',
-            ip_address=client_ip,
-            user_agent=user_agent,
         )
         db.add(report)
         db.flush()

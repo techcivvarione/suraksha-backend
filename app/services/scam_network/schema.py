@@ -50,7 +50,11 @@ def ensure_scam_network_tables() -> None:
                 "ALTER TABLE scam_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
             ]:
                 conn.execute(text(statement))
-            conn.execute(text("UPDATE scam_reports SET created_at = COALESCE(created_at, reported_at, now()), updated_at = COALESCE(updated_at, reported_at, now()), scam_description = COALESCE(scam_description, description), status = COALESCE(status, 'REPORTED'), visibility_status = COALESCE(visibility_status, 'SUSPICIOUS')"))
+            conn.execute(
+                text(
+                    "UPDATE scam_reports SET created_at = COALESCE(created_at, now()), updated_at = COALESCE(updated_at, now()), status = COALESCE(status, 'REPORTED'), visibility_status = COALESCE(visibility_status, 'SUSPICIOUS')"
+                )
+            )
 
         ScamNumber.__table__.create(bind=engine, checkfirst=True)
         PhishingLink.__table__.create(bind=engine, checkfirst=True)

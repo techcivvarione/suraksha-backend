@@ -217,7 +217,7 @@ def run_cyber_card_score_job():
                 """
                 SELECT COUNT(*) FROM scam_reports
                 WHERE user_id = CAST(:uid AS uuid)
-                  AND reported_at >= :start
+                  AND created_at >= :start
                 """
             ),
             {"uid": uid, "start": month_start},

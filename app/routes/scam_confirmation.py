@@ -11,6 +11,15 @@ from app.services.audit_logger import create_audit_log
 
 router = APIRouter(prefix="/scam", tags=["Scam Confirmation"])
 
+
+def _compose_scam_description(*, title: str, description: str, source: str | None = None, loss_amount: str | None = None) -> str:
+    parts = [f"Title: {title}", description]
+    if source:
+        parts.append(f"Source: {source}")
+    if loss_amount:
+        parts.append(f"Loss amount: {loss_amount}")
+    return "\n".join(parts)
+
 @router.post("/confirm")
 def confirm_scam(
     request: Request,
@@ -27,7 +36,7 @@ def confirm_scam(
         text("""
             SELECT 1 FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
-              AND reported_at >= date_trunc('month', now())
+              AND created_at >= date_trunc('month', now())
         """),
         {"uid": str(current_user.id)},
     ).first()
@@ -40,13 +49,18 @@ def confirm_scam(
 
     report = ScamReport(
         user_id=current_user.id,
-        scam_type=scam_type,
-        title=title,
-        description=description,
-        source=source,
-        scam_value=loss_amount,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
+        report_type="payment" if loss_amount else "call",
+        category=scam_type,
+        phishing_url=source if source and source.lower().startswith(("http://", "https://")) else None,
+        normalized_url=source if source and source.lower().startswith(("http://", "https://")) else None,
+        scam_description=_compose_scam_description(
+            title=title,
+            description=description,
+            source=source,
+            loss_amount=loss_amount,
+        ),
+        status="REPORTED",
+        visibility_status="SUSPICIOUS",
     )
 
     db.add(report)

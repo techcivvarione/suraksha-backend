@@ -13,12 +13,6 @@ class ScamReport(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
 
-    scam_type = Column(String(50), nullable=True)
-    title = Column(String(255), nullable=True)
-    description = Column(Text, nullable=True)
-    source = Column(String(255), nullable=True)
-    scam_value = Column(String(50), nullable=True)
-
     report_type = Column(String(32), nullable=True, index=True)
     category = Column(String(64), nullable=True, index=True)
     scam_phone_number = Column(String(32), nullable=True)
@@ -36,10 +30,5 @@ class ScamReport(Base):
     country = Column(String(128), nullable=True, index=True)
     status = Column(String(32), nullable=False, default="REPORTED", server_default="REPORTED")
     visibility_status = Column(String(32), nullable=False, default="SUSPICIOUS", server_default="SUSPICIOUS")
-
-    ip_address = Column(String(45), nullable=True)
-    user_agent = Column(Text, nullable=True)
-
-    reported_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

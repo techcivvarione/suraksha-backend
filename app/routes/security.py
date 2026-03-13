@@ -22,6 +22,45 @@ from app.services.cyber_complaint_generator import generate_cyber_complaint_text
 router = APIRouter(prefix="/security", tags=["Account Security"])
 
 
+def _infer_report_type(*, source: Optional[str] = None, scam_value: Optional[str] = None) -> str:
+    if source and source.lower().startswith(("http://", "https://")):
+        return "link"
+    if scam_value:
+        return "payment"
+    return "call"
+
+
+def _compose_scam_description(*, description: str, title: Optional[str] = None, source: Optional[str] = None, scam_value: Optional[str] = None) -> str:
+    parts = []
+    if title:
+        parts.append(f"Title: {title}")
+    parts.append(description)
+    if source:
+        parts.append(f"Source: {source}")
+    if scam_value:
+        parts.append(f"Loss amount: {scam_value}")
+    return "\n".join(parts)
+
+
+def _build_scam_report(*, user_id, category: str, description: str, title: Optional[str] = None, source: Optional[str] = None, scam_value: Optional[str] = None) -> ScamReport:
+    phishing_url = source if source and source.lower().startswith(("http://", "https://")) else None
+    return ScamReport(
+        user_id=user_id,
+        report_type=_infer_report_type(source=source, scam_value=scam_value),
+        category=category,
+        phishing_url=phishing_url,
+        normalized_url=phishing_url,
+        scam_description=_compose_scam_description(
+            title=title,
+            description=description,
+            source=source,
+            scam_value=scam_value,
+        ),
+        status="REPORTED",
+        visibility_status="SUSPICIOUS",
+    )
+
+
 # =========================================================
 # MODELS
 # =========================================================
@@ -222,15 +261,13 @@ def submit_scam_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    report = ScamReport(
+    report = _build_scam_report(
         user_id=current_user.id,
         scam_type=payload.scam_type,
         title=payload.title,
         description=payload.description,
         source=payload.source,
         scam_value=payload.scam_value,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
     )
 
     db.add(report)
@@ -261,7 +298,7 @@ def preview_cyber_complaint(
         user_name=current_user.name,
         phone=current_user.phone_number or "Not provided",
         email=current_user.email,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         incident_date=payload.incident_date,
         loss_amount=payload.loss_amount,
         description=payload.description,
@@ -355,7 +392,7 @@ def confirm_scam(
         text("""
             SELECT 1 FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
-              AND reported_at >= date_trunc('month', now())
+              AND created_at >= date_trunc('month', now())
             LIMIT 1
         """),
         {"uid": str(current_user.id)},
@@ -368,15 +405,13 @@ def confirm_scam(
         )
 
     # 2️⃣ Insert scam report
-    report = ScamReport(
+    report = _build_scam_report(
         user_id=current_user.id,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         title=payload.title,
         description=payload.description,
         source=payload.source,
         scam_value=payload.scam_value,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
     )
 
     db.add(report)
@@ -441,10 +476,10 @@ def cyber_sos_confirm(
     # 🔒 30-Second Protection (Prevents spam clicks)
     last_sos = db.execute(
         text("""
-            SELECT reported_at
+            SELECT created_at
             FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
-            ORDER BY reported_at DESC
+            ORDER BY created_at DESC
             LIMIT 1
         """),
         {"uid": str(current_user.id)},
@@ -462,15 +497,13 @@ def cyber_sos_confirm(
             )
 
     # 🧾 Insert confirmed scam (NO monthly restriction anymore)
-    report = ScamReport(
+    report = _build_scam_report(
         user_id=current_user.id,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         title="Cyber SOS – Confirmed Scam",
         description=payload.description,
         source=payload.source,
         scam_value=payload.loss_amount,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
     )
 
     db.add(report)
