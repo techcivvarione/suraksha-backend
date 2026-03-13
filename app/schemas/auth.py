@@ -16,3 +16,9 @@ class SignupRequest(BaseModel):
     accepted_terms: bool
     terms_version: Optional[str] = "v1"
     privacy_version: Optional[str] = "v1"
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    needs_terms_acceptance: bool

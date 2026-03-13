@@ -21,7 +21,7 @@ from app.db import get_db
 from app.core.features import TIER_FREE
 from app.models.user import User
 from app.models.email_otp import EmailOtp
-from app.schemas.auth import SignupRequest
+from app.schemas.auth import LoginResponse, SignupRequest
 from app.services.audit_logger import create_audit_log
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
 from app.services.email_service import send_otp_email
@@ -469,7 +469,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     return {"status": "signup_success"}
 
 
-@router.post("/login")
+@router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"login:{request.client.host}", db)
 
@@ -487,15 +487,6 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not getattr(user, "accepted_terms", False):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "TERMS_REQUIRED",
-                "message": "You must accept the Privacy Policy and Terms of Service to continue.",
-            },
-        )
-
     token = create_access_token(user)
 
     create_audit_log(
@@ -506,7 +497,11 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         request=request,
     )
 
-    return {"access_token": token, "token_type": "bearer"}
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "needs_terms_acceptance": not bool(getattr(user, "accepted_terms", False)),
+    }
 
 
 @router.post("/google")
