@@ -71,7 +71,13 @@ def _scan_error_payload(exc: HTTPException) -> dict:
     return {"success": False, "error": "SCAN_BAD_REQUEST", "message": message}
 
 
-app = FastAPI(title="GO Suraksha API", version="1.0.0")
+app = FastAPI(
+    title="GO Suraksha API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
 
 
 @app.get("/test-push")
