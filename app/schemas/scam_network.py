@@ -40,6 +40,11 @@ class ScamReportResponse(BaseModel):
 
 class ScamNumberCheckRequest(BaseModel):
     phone_number: str
+    lat: float | None = None
+    lng: float | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
 
 
 class ScamNumberCheckResponse(BaseModel):
@@ -91,6 +96,7 @@ class HeatmapPoint(BaseModel):
     lat: float
     lng: float
     count: int
+    verified: bool
     category_breakdown: dict[str, int]
 
 
@@ -119,3 +125,14 @@ class TrendingScamItem(BaseModel):
 
 class TrendingScamsResponse(BaseModel):
     trending: list[TrendingScamItem]
+
+
+class ScamRadarEvent(BaseModel):
+    lat: float | None = None
+    lng: float | None = None
+    category: str | None = None
+    source: Literal["scan", "report"]
+
+
+class ScamRadarLiveResponse(BaseModel):
+    events: list[ScamRadarEvent]

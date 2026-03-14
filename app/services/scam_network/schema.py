@@ -48,6 +48,20 @@ def ensure_scam_network_tables() -> None:
                 "ALTER TABLE scam_reports ADD COLUMN IF NOT EXISTS visibility_status TEXT DEFAULT 'SUSPICIOUS'",
                 "ALTER TABLE scam_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()",
                 "ALTER TABLE scam_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+                """
+                CREATE TABLE IF NOT EXISTS scan_events (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    phone_number TEXT,
+                    category TEXT,
+                    latitude DOUBLE PRECISION,
+                    longitude DOUBLE PRECISION,
+                    country TEXT,
+                    state TEXT,
+                    city TEXT,
+                    source TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """,
             ]:
                 conn.execute(text(statement))
             conn.execute(
@@ -67,6 +81,7 @@ def ensure_scam_network_tables() -> None:
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_location ON scam_reports (latitude, longitude)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_created ON scam_reports (created_at)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_state ON scam_reports (state)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scan_events_created ON scan_events(created_at DESC)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_attack_locations_window_geohash ON attack_locations (time_window, geohash)'))
             for category_id, slug, name, description in CATEGORY_SEEDS:
                 conn.execute(
@@ -77,4 +92,3 @@ def ensure_scam_network_tables() -> None:
                 )
     except SQLAlchemyError:
         logger.exception('scam_network_schema_ensure_failed')
-

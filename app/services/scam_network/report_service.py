@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.scam_report import ScamReport
@@ -15,6 +16,39 @@ from app.services.scam_network.normalization import normalize_payment_handle, no
 class ScamReportResult:
     report: ScamReport
     duplicate: bool
+
+
+def record_scan_event(
+    db: Session,
+    phone: str | None,
+    category: str | None,
+    lat: float | None,
+    lng: float | None,
+    city: str | None,
+    state: str | None,
+    country: str | None,
+    *,
+    source: str = "scan",
+) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO scan_events
+            (phone_number, category, latitude, longitude, city, state, country, source)
+            VALUES (:phone, :category, :lat, :lng, :city, :state, :country, :source)
+            """
+        ),
+        {
+            "phone": phone,
+            "category": category,
+            "lat": lat,
+            "lng": lng,
+            "city": city,
+            "state": state,
+            "country": country,
+            "source": source,
+        },
+    )
 
 
 class ScamReportService:
@@ -55,6 +89,17 @@ class ScamReportService:
         )
         db.add(report)
         db.flush()
+        record_scan_event(
+            db,
+            phone=report.scam_phone_number or normalized_phone,
+            category=report.category,
+            lat=report.latitude,
+            lng=report.longitude,
+            city=report.city,
+            state=report.state,
+            country=report.country,
+            source="report",
+        )
         if not duplicate:
             update_aggregations(db, report)
         else:

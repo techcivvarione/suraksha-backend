@@ -40,6 +40,7 @@ def fetch_heatmap_points(
             "lat": float(row["lat"]),
             "lng": float(row["lng"]),
             "count": int(row["count"] or 0),
+            "verified": True,
             "category_breakdown": {
                 str(key): int(value)
                 for key, value in dict(row["category_breakdown"] or {}).items()
@@ -230,3 +231,5 @@ def _regional_query(
         GROUP BY {group_by_columns}
         ORDER BY rr.count DESC, rr.lat, rr.lng
     """
+
+

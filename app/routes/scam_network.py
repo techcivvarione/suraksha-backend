@@ -19,7 +19,7 @@ from app.services.scam_network.abuse_guard import ScamNetworkAbuseError
 from app.services.scam_network.aggregation_service import fetch_alerts, get_number_intelligence
 from app.services.scam_network.message_detection import analyze_message_text
 from app.services.scam_network.normalization import normalize_phone_number
-from app.services.scam_network.report_service import ScamReportService
+from app.services.scam_network.report_service import ScamReportService, record_scan_event
 
 router = APIRouter(prefix='/scam', tags=['Scam Alert Network'])
 report_service = ScamReportService()
@@ -60,6 +60,18 @@ def check_number(
     if not normalized_phone:
         raise HTTPException(status_code=400, detail='Invalid phone number')
     aggregate = get_number_intelligence(db, normalized_phone)
+    record_scan_event(
+        db,
+        phone=normalized_phone,
+        category=aggregate.top_category if aggregate else None,
+        lat=payload.lat,
+        lng=payload.lng,
+        city=payload.city,
+        state=payload.state,
+        country=payload.country,
+        source='scan',
+    )
+    db.commit()
     if not aggregate:
         return ScamNumberCheckResponse(
             suspicion_level='low',
@@ -111,6 +123,18 @@ def verify_call(
     if not normalized_phone:
         raise HTTPException(status_code=400, detail='Invalid phone number')
     aggregate = get_number_intelligence(db, normalized_phone)
+    record_scan_event(
+        db,
+        phone=normalized_phone,
+        category=aggregate.top_category if aggregate else None,
+        lat=payload.lat,
+        lng=payload.lng,
+        city=payload.city,
+        state=payload.state,
+        country=payload.country,
+        source='scan',
+    )
+    db.commit()
     if not aggregate:
         return ScamVerifyCallResponse(
             risk_level='low',
