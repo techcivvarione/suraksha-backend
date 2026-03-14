@@ -64,6 +64,9 @@ def ensure_scam_network_tables() -> None:
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_scam_reports_phone_created ON scam_reports (normalized_phone_number, created_at)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_scam_reports_url_created ON scam_reports (normalized_url, created_at)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_scam_reports_state_country_created ON scam_reports (state, country, created_at)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_location ON scam_reports (latitude, longitude)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_created ON scam_reports (created_at)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_state ON scam_reports (state)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_attack_locations_window_geohash ON attack_locations (time_window, geohash)'))
             for category_id, slug, name, description in CATEGORY_SEEDS:
                 conn.execute(
@@ -74,3 +77,4 @@ def ensure_scam_network_tables() -> None:
                 )
     except SQLAlchemyError:
         logger.exception('scam_network_schema_ensure_failed')
+

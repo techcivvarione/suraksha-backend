@@ -83,28 +83,39 @@ class ScamAlertsResponse(BaseModel):
     total: int
 
 
+HeatmapScope = Literal["city", "state", "country", "global"]
+HeatmapTimeWindow = Literal["1h", "24h", "7d", "30d"]
+
+
 class HeatmapPoint(BaseModel):
     lat: float
     lng: float
     count: int
-    severity: str
-    city: str | None = None
-    state: str | None = None
-    country: str | None = None
+    category_breakdown: dict[str, int]
 
 
 class ScamHeatmapResponse(BaseModel):
+    scope: HeatmapScope
+    time_window: HeatmapTimeWindow
     points: list[HeatmapPoint]
+
+
+class ScamHotspotItem(BaseModel):
+    region: str
+    state: str | None = None
+    country: str | None = None
+    count: int
+    trend: Literal["increasing", "stable", "decreasing", "new"]
+
+
+class ScamHotspotsResponse(BaseModel):
+    hotspots: list[ScamHotspotItem]
 
 
 class TrendingScamItem(BaseModel):
     category: str
-    report_count: int
-    trend: str
-    top_regions: list[str]
-    message: str
+    count: int
 
 
 class TrendingScamsResponse(BaseModel):
-    window: str
-    items: list[TrendingScamItem]
+    trending: list[TrendingScamItem]
