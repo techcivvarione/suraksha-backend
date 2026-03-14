@@ -23,18 +23,14 @@ def get_firebase():
 
     raw_credentials = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()
     if not raw_credentials:
-        raise RuntimeError(
-            "FIREBASE_SERVICE_ACCOUNT environment variable missing"
-        )
+        raise RuntimeError("FIREBASE_SERVICE_ACCOUNT environment variable missing")
     try:
         service_account_info = json.loads(raw_credentials)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "Invalid FIREBASE_SERVICE_ACCOUNT JSON"
-        ) from exc
+        raise RuntimeError("Invalid FIREBASE_SERVICE_ACCOUNT JSON") from exc
     cred = credentials.Certificate(service_account_info)
     firebase_app = firebase_admin.initialize_app(cred)
-    print("Firebase Admin initialized successfully")
+    logger.info("firebase_admin_initialized")
     return firebase_app
 
 
@@ -46,14 +42,7 @@ def send_push_notification(
 ) -> str:
     get_firebase()
     payload = {str(key): str(value) for key, value in (data or {}).items()}
-    message = messaging.Message(
-        token=token,
-        notification=messaging.Notification(title=title, body=body),
-        data=payload,
-    )
+    message = messaging.Message(token=token, notification=messaging.Notification(title=title, body=body), data=payload)
     message_id = messaging.send(message)
-    logger.info(
-        "firebase_push_sent",
-        extra={"token_prefix": token[:12], "message_id": message_id},
-    )
+    logger.info("firebase_push_sent", extra={"message_id": message_id})
     return message_id

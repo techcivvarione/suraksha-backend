@@ -1,23 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.models.scam_report import ScamReport
-from app.routes.auth import get_current_user, verify_password, hash_password
+from app.models.user import User
+from app.routes.auth import (
+    get_current_user,
+    hash_password,
+    invalidate_user_sessions,
+    validate_password_strength,
+    verify_password,
+)
 from app.services.alert_rate_limiter import AlertRateLimiterError, enforce_alert_limits
 from app.services.audit_logger import create_audit_log
+from app.services.cyber_complaint_generator import generate_cyber_complaint_text
+from app.services.evidence_exporter import generate_evidence_bundle
 from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
 from app.services.security_plan_limits import allows_family_alerts
-from app.services.evidence_exporter import generate_evidence_bundle
-from app.services.cyber_complaint_generator import generate_cyber_complaint_text
 
 router = APIRouter(prefix="/security", tags=["Account Security"])
 
@@ -50,28 +56,23 @@ def _build_scam_report(*, user_id, category: str, description: str, title: Optio
         category=category,
         phishing_url=phishing_url,
         normalized_url=phishing_url,
-        scam_description=_compose_scam_description(
-            title=title,
-            description=description,
-            source=source,
-            scam_value=scam_value,
-        ),
+        scam_description=_compose_scam_description(title=title, description=description, source=source, scam_value=scam_value),
         status="REPORTED",
         visibility_status="SUSPICIOUS",
     )
 
 
-# =========================================================
-# MODELS
-# =========================================================
-
 class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     current_password: str
     new_password: str
     confirm_password: str
 
 
 class ScamReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scam_type: str
     title: str
     description: str
@@ -79,16 +80,18 @@ class ScamReportRequest(BaseModel):
     scam_value: Optional[str] = None
 
 
-# 🔹 NEW — Cyber Complaint Preview
 class CyberComplaintPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scam_type: str
     incident_date: str
     description: str
     loss_amount: Optional[str] = None
 
 
-# 🔹 NEW — Cyber SOS Request (FIX)
 class CyberSOSRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scam_type: str
     incident_date: str
     description: str
@@ -97,12 +100,20 @@ class CyberSOSRequest(BaseModel):
 
 
 class CyberEmergencyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: Optional[str] = "User triggered Cyber Emergency"
 
 
-# =========================================================
-# ACCOUNT SECURITY
-# =========================================================
+class ScamConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scam_type: str
+    title: str
+    description: str
+    source: Optional[str] = None
+    scam_value: Optional[str] = None
+
 
 @router.post("/change-password")
 def change_password(
@@ -112,25 +123,16 @@ def change_password(
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password incorrect")
-
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
+    validate_password_strength(payload.new_password)
     current_user.password_hash = hash_password(payload.new_password)
-    current_user.updated_at = datetime.utcnow()
     current_user.password_changed_at = datetime.utcnow()
-
+    invalidate_user_sessions(current_user)
     db.add(current_user)
     db.commit()
-
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="PASSWORD_CHANGED",
-        event_description="User changed account password",
-        request=None,
-    )
-
+    create_audit_log(db=db, user_id=current_user.id, event_type="PASSWORD_CHANGED", event_description="User changed account password", request=None)
     return {"status": "password_changed"}
 
 
@@ -139,18 +141,10 @@ def logout_all_sessions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user.updated_at = datetime.utcnow()
+    invalidate_user_sessions(current_user)
     db.add(current_user)
     db.commit()
-
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="LOGOUT_ALL",
-        event_description="User logged out from all sessions",
-        request=None,
-    )
-
+    create_audit_log(db=db, user_id=current_user.id, event_type="LOGOUT_ALL", event_description="User logged out from all sessions", request=None)
     return {"status": "all_sessions_logged_out"}
 
 
@@ -158,37 +152,30 @@ def logout_all_sessions(
 def security_status(current_user: User = Depends(get_current_user)):
     return {
         "password_last_changed": current_user.password_changed_at,
-        "session_model": "stateless JWT",
-        "note": "All tokens issued before password change are invalid",
+        "session_model": "stateless_jwt_with_token_version",
+        "note": "All tokens issued before password changes or logout-all are invalidated.",
     }
 
 
-# =========================================================
-# SECURITY HEALTH SCORE (30 DAYS)
-# =========================================================
-
 @router.get("/health-score")
-def security_health_score(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def security_health_score(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     since = datetime.utcnow() - timedelta(days=30)
-
     rows = db.execute(
-        text("""
+        text(
+            """
             SELECT risk, COUNT(*) AS count, MAX(created_at) AS last_scan
             FROM scan_history
             WHERE user_id = CAST(:user_id AS uuid)
               AND created_at >= :since
             GROUP BY risk
-        """),
+            """
+        ),
         {"user_id": str(current_user.id), "since": since},
     ).mappings().all()
 
     score = 100
     stats = {"high": 0, "medium": 0, "low": 0}
     last_scan_at = None
-
     for row in rows:
         stats[row["risk"]] += row["count"]
         if row["last_scan"]:
@@ -196,12 +183,9 @@ def security_health_score(
 
     score -= stats["high"] * 20
     score -= stats["medium"] * 10
-
     if sum(stats.values()) == 0:
         score -= 25
-
     score = max(0, min(100, score))
-
     level = "good" if score >= 80 else "warning" if score >= 50 else "critical"
 
     return {
@@ -218,10 +202,6 @@ def security_health_score(
     }
 
 
-# =========================================================
-# AUDIT LOGS
-# =========================================================
-
 @router.get("/audit-logs")
 def get_audit_logs(
     limit: int = Query(20, ge=1, le=100),
@@ -233,9 +213,7 @@ def get_audit_logs(
     query = db.query(AuditLog).filter(AuditLog.user_id == current_user.id)
     if event_type:
         query = query.filter(AuditLog.event_type == event_type)
-
     logs = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
-
     return {
         "count": len(logs),
         "data": [
@@ -249,10 +227,6 @@ def get_audit_logs(
         ],
     }
 
-
-# =========================================================
-# SCAM REPORTING
-# =========================================================
 
 @router.post("/scam-report")
 def submit_scam_report(
@@ -269,41 +243,24 @@ def submit_scam_report(
         source=payload.source,
         scam_value=payload.scam_value,
     )
-
     db.add(report)
     db.commit()
     db.refresh(report)
-
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="SCAM_REPORTED",
-        event_description=f"Scam reported: {payload.title}",
-        request=request,
-    )
-
+    create_audit_log(db=db, user_id=current_user.id, event_type="SCAM_REPORTED", event_description="Scam reported", request=request)
     return {"status": "reported", "report_id": str(report.id)}
 
 
-# =========================================================
-# 🧾 CYBER COMPLAINT PREVIEW (NEW)
-# =========================================================
-
 @router.post("/cyber-complaint/preview")
-def preview_cyber_complaint(
-    payload: CyberComplaintPreviewRequest,
-    current_user: User = Depends(get_current_user),
-):
+def preview_cyber_complaint(payload: CyberComplaintPreviewRequest, current_user: User = Depends(get_current_user)):
     complaint_text = generate_cyber_complaint_text(
         user_name=current_user.name,
         phone=current_user.phone_number or "Not provided",
         email=current_user.email,
-        category=payload.scam_type,
+        scam_type=payload.scam_type,
         incident_date=payload.incident_date,
         loss_amount=payload.loss_amount,
         description=payload.description,
     )
-
     return {
         "helpline": "1930",
         "portal": "https://cybercrime.gov.in",
@@ -312,29 +269,11 @@ def preview_cyber_complaint(
     }
 
 
-# =========================================================
-# EVIDENCE EXPORT
-# =========================================================
-
 @router.get("/evidence/export")
-def export_evidence(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def export_evidence(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     bundle = generate_evidence_bundle(db, current_user)
-
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="EVIDENCE_EXPORTED",
-        event_description="User exported security evidence",
-        request=None,
-    )
-
-    return JSONResponse(
-        content=bundle,
-        headers={"Content-Disposition": "attachment; filename=go-suraksha-evidence.json"},
-    )
+    create_audit_log(db=db, user_id=current_user.id, event_type="EVIDENCE_EXPORTED", event_description="User exported security evidence", request=None)
+    return JSONResponse(content=bundle, headers={"Content-Disposition": "attachment; filename=go-suraksha-evidence.json"})
 
 
 @router.get("/health-trend")
@@ -344,35 +283,20 @@ def health_trend(
     current_user: User = Depends(get_current_user),
 ):
     rows = db.execute(
-        text("""
+        text(
+            """
             SELECT score_date, score
             FROM daily_security_scores
             WHERE user_id = CAST(:uid AS uuid)
               AND score_date >= CURRENT_DATE - :days
             ORDER BY score_date ASC
-        """),
+            """
+        ),
         {"uid": str(current_user.id), "days": days},
     ).mappings().all()
-
     if not rows:
         return {"window_days": days, "trend": []}
-
-    return {
-        "window_days": days,
-        "current_score": rows[-1]["score"],
-        "trend": [{"date": r["score_date"], "score": r["score"]} for r in rows],
-    }
-
-# =========================================================
-# 🚨 SCAM CONFIRMATION (FINAL – SCORE IMPACT)
-# =========================================================
-
-class ScamConfirmRequest(BaseModel):
-    scam_type: str
-    title: str
-    description: str
-    source: Optional[str] = None
-    scam_value: Optional[str] = None
+    return {"window_days": days, "current_score": rows[-1]["score"], "trend": [{"date": r["score_date"], "score": r["score"]} for r in rows]}
 
 
 @router.post("/scam-confirm")
@@ -382,71 +306,39 @@ def confirm_scam(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    FINAL confirmation.
-    Triggers Cyber Score penalty via monthly job.
-    """
-
-    # 1️⃣ Block multiple confirmations in same month
     already = db.execute(
-        text("""
+        text(
+            """
             SELECT 1 FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
               AND created_at >= date_trunc('month', now())
             LIMIT 1
-        """),
+            """
+        ),
         {"uid": str(current_user.id)},
     ).first()
-
     if already:
-        raise HTTPException(
-            status_code=400,
-            detail="Scam already confirmed this month",
-        )
+        raise HTTPException(status_code=400, detail="Scam already confirmed this month")
 
-    # 2️⃣ Insert scam report
     report = _build_scam_report(
         user_id=current_user.id,
-        category=payload.scam_type,
+        scam_type=payload.scam_type,
         title=payload.title,
         description=payload.description,
         source=payload.source,
         scam_value=payload.scam_value,
     )
-
     db.add(report)
     db.commit()
     db.refresh(report)
+    create_audit_log(db=db, user_id=current_user.id, event_type="SCAM_CONFIRMED", event_description="User confirmed scam incident", request=request)
 
-    # 3️⃣ Audit log (CRITICAL)
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="SCAM_CONFIRMED",
-        event_description="User confirmed scam incident",
-        request=request,
-    )
-
-    # 4️⃣ Notify trusted + family (best-effort)
     try:
         enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None)
-        event = create_alert_event(
-            db=db,
-            user_id=current_user.id,
-            trigger_type="SCAM_CONFIRMED",
-            analysis_type="SCAM",
-            risk_score=95,
-        )
-        dispatch_plan_alerts(
-            db=db,
-            user=current_user,
-            trigger_type="SCAM_CONFIRMED",
-            risk_score=95,
-            scan_id=None,
-            alert_event_id=event.id,
-        )
+        event = create_alert_event(db=db, user_id=current_user.id, trigger_type="SCAM_CONFIRMED", analysis_type="SCAM", risk_score=95)
+        dispatch_plan_alerts(db=db, user=current_user, trigger_type="SCAM_CONFIRMED", risk_score=95, scan_id=None, alert_event_id=event.id)
     except Exception:
-        pass  # never block confirmation
+        pass
 
     return {
         "status": "scam_confirmed",
@@ -460,9 +352,6 @@ def confirm_scam(
         ],
     }
 
-# =========================================================
-# CYBER SOS — SCAM CONFIRMATION & COMPLAINT ASSIST
-# =========================================================
 
 @router.post("/cyber-sos/confirm")
 def cyber_sos_confirm(
@@ -471,79 +360,55 @@ def cyber_sos_confirm(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from datetime import datetime
-
-    # 🔒 30-Second Protection (Prevents spam clicks)
     last_sos = db.execute(
-        text("""
+        text(
+            """
             SELECT created_at
             FROM scam_reports
             WHERE user_id = CAST(:uid AS uuid)
             ORDER BY created_at DESC
             LIMIT 1
-        """),
+            """
+        ),
         {"uid": str(current_user.id)},
     ).first()
-
     if last_sos:
         last_time = last_sos[0]
         if last_time and (datetime.utcnow() - last_time).total_seconds() < 30:
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "CYBER_SOS_RATE_LIMIT",
-                    "message": "Please wait 30 seconds before triggering Cyber SOS again"
-                }
-            )
+            raise HTTPException(status_code=429, detail={"error": "CYBER_SOS_RATE_LIMIT", "message": "Please wait 30 seconds before triggering Cyber SOS again"})
 
-    # 🧾 Insert confirmed scam (NO monthly restriction anymore)
     report = _build_scam_report(
         user_id=current_user.id,
-        category=payload.scam_type,
-        title="Cyber SOS – Confirmed Scam",
+        scam_type=payload.scam_type,
+        title="Cyber SOS - Confirmed Scam",
         description=payload.description,
         source=payload.source,
         scam_value=payload.loss_amount,
     )
-
     db.add(report)
     db.commit()
     db.refresh(report)
 
-    # 📝 Generate complaint text
     complaint_text = generate_cyber_complaint_text(
-    user_name=current_user.name,
-    phone=current_user.phone_number or "Not provided",
-    email=current_user.email,
-    scam_type=payload.scam_type,
-    incident_date=payload.incident_date,
-    loss_amount=payload.loss_amount,
-    description=payload.description,
-)
-
-
-    # 🧾 Audit log (unchanged)
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="CYBER_SOS_CONFIRMED",
-        event_description="User confirmed scam via Cyber SOS",
-        request=request,
+        user_name=current_user.name,
+        phone=current_user.phone_number or "Not provided",
+        email=current_user.email,
+        scam_type=payload.scam_type,
+        incident_date=payload.incident_date,
+        loss_amount=payload.loss_amount,
+        description=payload.description,
     )
-
+    create_audit_log(db=db, user_id=current_user.id, event_type="CYBER_SOS_CONFIRMED", event_description="User confirmed scam via Cyber SOS", request=request)
     return {
         "status": "CYBER_SOS_CONFIRMED",
-        "emergency_contact": {
-            "india_helpline": "1930",
-            "portal": "https://cybercrime.gov.in"
-        },
+        "emergency_contact": {"india_helpline": "1930", "portal": "https://cybercrime.gov.in"},
         "complaint_copy": complaint_text,
         "next_steps": [
             "Call 1930 immediately if financial fraud occurred",
             "Paste the complaint text on cybercrime.gov.in",
             "Upload screenshots, transaction proof, messages",
-            "Change passwords & secure affected accounts"
-        ]
+            "Change passwords and secure affected accounts",
+        ],
     }
 
 
@@ -560,13 +425,7 @@ def cyber_emergency(
     except AlertRateLimiterError as exc:
         raise HTTPException(status_code=429, detail=str(exc))
 
-    event = create_alert_event(
-        db=db,
-        user_id=current_user.id,
-        trigger_type="CYBER_EMERGENCY",
-        analysis_type="SOS",
-        risk_score=100,
-    )
+    event = create_alert_event(db=db, user_id=current_user.id, trigger_type="CYBER_EMERGENCY", analysis_type="SOS", risk_score=100)
     dispatch = dispatch_plan_alerts(
         db=db,
         user=current_user,
@@ -576,24 +435,13 @@ def cyber_emergency(
         alert_event_id=event.id,
         force_trusted=True,
     )
-
     event.status = "SENT"
     db.add(event)
     db.commit()
-
-    create_audit_log(
-        db=db,
-        user_id=current_user.id,
-        event_type="CYBER_EMERGENCY_TRIGGERED",
-        event_description="User triggered Cyber Emergency",
-        request=request,
-    )
-
+    create_audit_log(db=db, user_id=current_user.id, event_type="CYBER_EMERGENCY_TRIGGERED", event_description="User triggered Cyber Emergency", request=request)
     return {
         "status": "CYBER_EMERGENCY_TRIGGERED",
         "message": payload.message or "User triggered Cyber Emergency",
         "family_alerts_enabled": allows_family_alerts(current_user.plan),
         "dispatch": dispatch,
     }
-
-

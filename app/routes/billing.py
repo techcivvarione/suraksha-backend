@@ -1,37 +1,27 @@
-import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 
-from app.db import get_db
 from app.enums.user_plan import UserPlan
 from app.routes.auth import get_current_user
-from app.models.user import User
+from app.schemas.common import ErrorResponse
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
-logger = logging.getLogger(__name__)
 
 
 class UpgradeRequest(BaseModel):
     plan: UserPlan = Field(..., description="Target plan")
 
 
-@router.post("/upgrade")
+@router.post("/upgrade", responses={403: {"model": ErrorResponse}})
 def upgrade_plan(
     payload: UpgradeRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    target = payload.plan.value
-
-    # TODO integrate Razorpay / Stripe webhook
-    # upgrade plan after payment verification
-
-    current_user.plan = target
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-
-    logger.info("plan_upgrade", extra={"user_id": str(current_user.id), "plan": target})
-
-    return {"status": "success", "plan": target}
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "success": False,
+            "error": "DIRECT_UPGRADE_DISABLED",
+            "message": "Direct plan upgrades are disabled. Subscription changes are applied only from verified RevenueCat webhooks.",
+        },
+    )

@@ -1,19 +1,24 @@
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.user import User
-from app.routes.auth import get_current_user, hash_password, verify_password
+from app.routes.auth import (
+    get_current_user,
+    hash_password,
+    invalidate_user_sessions,
+    validate_password_strength,
+    verify_password,
+)
 from app.services.language import ALLOWED_LANGUAGES, normalize_language
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
 
-# ---------- models ----------
 class ProfileUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -30,7 +35,6 @@ class PasswordUpdateRequest(BaseModel):
     confirm_new_password: str
 
 
-# ---------- routes ----------
 @router.get("/")
 def get_profile(current_user: User = Depends(get_current_user)):
     return {
@@ -53,10 +57,8 @@ def update_profile(
 ):
     if payload.name is not None:
         current_user.name = payload.name
-
     if payload.phone_number is not None:
         current_user.phone_number = payload.phone_number
-
     if payload.preferred_language is not None:
         normalized = normalize_language(payload.preferred_language, supported=ALLOWED_LANGUAGES)
         if not normalized:
@@ -64,11 +66,9 @@ def update_profile(
         current_user.preferred_language = normalized
 
     current_user.updated_at = datetime.utcnow()
-
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
-
     return {"status": "profile_updated"}
 
 
@@ -80,14 +80,13 @@ def change_password(
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-
     if payload.new_password != payload.confirm_new_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
+    validate_password_strength(payload.new_password)
     current_user.password_hash = hash_password(payload.new_password)
-    current_user.updated_at = datetime.utcnow()
-
+    current_user.password_changed_at = datetime.utcnow()
+    invalidate_user_sessions(current_user)
     db.add(current_user)
     db.commit()
-
     return {"status": "password_updated"}

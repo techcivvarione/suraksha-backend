@@ -19,28 +19,16 @@ class User(Base):
 
     password_hash = Column(String, nullable=False)
     auth_provider = Column(String, nullable=False, default="password")
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
 
-    # Plan lifecycle is webhook-managed for non-free tiers.
     plan = Column(String, nullable=False, default=UserPlan.FREE.value)
     subscription_status = Column(String, nullable=False, default="ACTIVE")
     subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
     last_subscription_event_at = Column(DateTime(timezone=True), nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now()
-    )
-
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now()
-    )
-
-    password_changed_at = Column(
-        DateTime(timezone=True),
-        nullable=True
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
 
     preferred_language = Column(String, nullable=False, default="en", server_default="en")
     ai_image_lifetime_used = Column(Integer, nullable=False, default=0, server_default="0")

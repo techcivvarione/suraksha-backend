@@ -116,7 +116,16 @@ class FakeRedis:
         self.expiry[key] = time.time() + seconds
         return True
 
-    def eval(self, script, key_count, key, ttl_seconds, limit):
+    def eval(self, script, key_count, *args):
+        if "redis.call('GET', KEYS[1]) == ARGV[1]" in script:
+            key, token = args
+            if self.get(key) == token:
+                self.values.pop(key, None)
+                self.expiry.pop(key, None)
+                return 1
+            return 0
+
+        key, ttl_seconds, limit = args
         self._is_expired(key)
         if "return {1, current}" in script:
             current = int(self.values.get(key, 0))
@@ -162,27 +171,9 @@ def stub_detectors(monkeypatch):
 @pytest.fixture
 def token_users():
     return {
-        "free-token": SimpleNamespace(
-            id=uuid.uuid4(),
-            email="free@example.com",
-            name="Free User",
-            plan="FREE",
-            token="free-token",
-        ),
-        "pro-token": SimpleNamespace(
-            id=uuid.uuid4(),
-            email="pro@example.com",
-            name="Pro User",
-            plan="GO_PRO",
-            token="pro-token",
-        ),
-        "ultra-token": SimpleNamespace(
-            id=uuid.uuid4(),
-            email="ultra@example.com",
-            name="Ultra User",
-            plan="GO_ULTRA",
-            token="ultra-token",
-        ),
+        "free-token": SimpleNamespace(id=uuid.uuid4(), email="free@example.com", name="Free User", plan="FREE", token="free-token"),
+        "pro-token": SimpleNamespace(id=uuid.uuid4(), email="pro@example.com", name="Pro User", plan="GO_PRO", token="pro-token"),
+        "ultra-token": SimpleNamespace(id=uuid.uuid4(), email="ultra@example.com", name="Ultra User", plan="GO_ULTRA", token="ultra-token"),
     }
 
 

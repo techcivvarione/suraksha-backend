@@ -8,20 +8,17 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from app.core.logging_setup import configure_logging
+from app.core.monitoring import init_sentry
+from app.middleware.security import SecurityLoggingMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.firebase_service import send_push_notification
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
-
-print("========== DB DEBUG ==========")
-print("DATABASE_URL:", os.getenv("DATABASE_URL"))
-print("================================")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
+configure_logging()
+init_sentry()
 logger = logging.getLogger(__name__)
 
 
@@ -39,13 +36,17 @@ def _scan_error_payload(exc: HTTPException) -> dict:
         return {"success": False, "error": "SCAN_PROCESSING_ERROR", "message": message}
     return {"success": False, "error": "SCAN_BAD_REQUEST", "message": message}
 
+
 app = FastAPI(
     title="GO Suraksha API",
     version="1.0.0",
 )
 
+
 @app.get("/test-push")
 def test_push(token: str = Query(..., min_length=20)):
+    if (os.getenv("ENABLE_TEST_PUSH") or "false").strip().lower() != "true":
+        raise HTTPException(status_code=404, detail="Not found")
     try:
         message_id = send_push_notification(
             token=token,
@@ -57,10 +58,12 @@ def test_push(token: str = Query(..., min_length=20)):
             "message_id": message_id,
         }
     except Exception as exc:
+        logger.exception("test_push_failed")
         return {
             "status": "error",
             "error": str(exc),
         }
+
 
 @app.exception_handler(HTTPException)
 async def scan_http_exception_handler(request: Request, exc: HTTPException):
@@ -84,8 +87,9 @@ async def scan_validation_exception_handler(request: Request, exc: RequestValida
         )
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
-from app.middleware.security import SecurityLoggingMiddleware
+
 app.add_middleware(SecurityLoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 configured_origins = os.getenv("CORS_ORIGINS", "").strip()
 if configured_origins:
@@ -100,63 +104,51 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent"],
 )
 
 
 @app.on_event("startup")
 def startup():
-    logger.info("GO Suraksha API starting up")
+    logger.info("startup_begin")
 
     from app.services.cyber_card import ensure_cyber_card_indexes
-    from app.services.scam_network.schema import ensure_scam_network_tables
-    from app.services.user_terms_schema import ensure_user_terms_columns
     from app.services.reality_detection.engine import validate_runtime_dependencies
     from app.services.device_service import ensure_user_devices_table
     from app.services.scan_jobs import ensure_scan_jobs_table
-    from app.jobs.scan_event_cleanup import start_scan_event_cleanup_worker
-    from app.jobs.threat_ingestion_job import start_threat_ingestion_worker
 
     validate_runtime_dependencies()
-    ensure_user_terms_columns()
     ensure_cyber_card_indexes()
-    ensure_scam_network_tables()
     ensure_scan_jobs_table()
     ensure_user_devices_table()
-    start_scan_event_cleanup_worker()
-    start_threat_ingestion_worker()
 
     try:
         from app.services.news_ingestor import ingest_rss
-        ingest_rss()
-        logger.info("RSS ingestion completed")
-    except Exception as exc:
-        logger.error("RSS ingestion skipped: %s", exc)
 
-    logger.info("Startup completed")
+        ingest_rss()
+        logger.info("rss_ingestion_completed")
+    except Exception:
+        logger.exception("rss_ingestion_skipped")
+
+    logger.info("startup_complete")
 
 
 from app.routes.auth import router as auth_router
 from app.routes.profile import router as profile_router
-
 from app.routes.news import router as news_router
 from app.routes.home import router as home_router
 from app.routes.history import router as history_router
-
 from app.routes.analyze_ocr import router as analyze_ocr_router
-
 from app.routes.security import router as security_router
 from app.routes.trusted_contacts import router as trusted_contacts_router, legacy_router as trusted_contacts_legacy_router
 from app.routes.trusted import router as trusted_router
-
 from app.routes.alerts import router as alerts_router
 from app.routes.ai import router as ai_router
 from app.routes.risk import router as risk_router
 from app.routes.risk_timeline import router as risk_timeline_router
 from app.routes.risk_insights import router as risk_insights_router
 from app.routes.ai_explanations import router as ai_explanations_router
-
 from app.routes.family import router as family_router
 from app.routes import trusted_alerts
 from app.routes.cyber_card import router as cyber_card_router
@@ -167,7 +159,6 @@ from app.routes.scam_radar import router as radar_router
 from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr_secure import router as qr_secure_router
 from app.routes.media import router as media_router
-from app.routes.alerts import router as alerts_router
 from app.routes.scan_password import router as scan_password_router
 from app.routes.scan_email import router as scan_email_router
 from app.routes.scan_qr import router as scan_qr_router
@@ -180,28 +171,22 @@ from app.routes.devices import router as devices_router
 from app.routes.billing import router as billing_router
 from app.routes.webhooks import router as webhooks_router
 
-
 app.include_router(auth_router)
 app.include_router(profile_router)
-
 app.include_router(news_router)
 app.include_router(home_router)
 app.include_router(history_router)
-
 app.include_router(analyze_ocr_router)
-
 app.include_router(security_router)
 app.include_router(trusted_contacts_router)
 app.include_router(trusted_contacts_legacy_router)
 app.include_router(trusted_router)
-
 app.include_router(alerts_router)
 app.include_router(ai_router)
 app.include_router(risk_router)
 app.include_router(risk_timeline_router)
 app.include_router(risk_insights_router)
 app.include_router(ai_explanations_router)
-
 app.include_router(family_router)
 app.include_router(trusted_alerts.router)
 app.include_router(cyber_card_router)
@@ -212,7 +197,6 @@ app.include_router(radar_router)
 app.include_router(ai_image_router)
 app.include_router(qr_secure_router)
 app.include_router(media_router)
-app.include_router(alerts_router)
 app.include_router(scan_password_router)
 app.include_router(scan_email_router)
 app.include_router(scan_qr_router)
@@ -233,23 +217,3 @@ def health_check():
         "service": "go-suraksha-backend",
         "version": "1.0.0",
     }
-
-
-@app.on_event("startup")
-def show_routes():
-    print("\n=== REGISTERED ROUTES ===")
-    for route in app.routes:
-        print(route.path)
-    print("=========================\n")
-
-
-
-@app.on_event("shutdown")
-def shutdown_background_workers():
-    from app.jobs.scan_event_cleanup import stop_scan_event_cleanup_worker
-    from app.jobs.threat_ingestion_job import stop_threat_ingestion_worker
-    stop_scan_event_cleanup_worker()
-    stop_threat_ingestion_worker()
-
-
-
