@@ -1,5 +1,7 @@
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,9 +10,11 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.core.logging_setup import configure_logging
 from app.core.monitoring import init_sentry
+from app.db import engine
 from app.middleware.security import SecurityLoggingMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.firebase_service import send_push_notification
@@ -20,6 +24,36 @@ load_dotenv(BASE_DIR / ".env")
 configure_logging()
 init_sentry()
 logger = logging.getLogger(__name__)
+
+
+def run_startup_migrations() -> None:
+    command = [sys.executable, "-m", "alembic", "upgrade", "head"]
+    result = subprocess.run(command, cwd=str(BASE_DIR), capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error("startup_migrations_failed", extra={"stderr": result.stderr[-1000:]})
+        raise RuntimeError("Database migrations failed")
+    logger.info("startup_migrations_applied")
+
+
+
+def ensure_token_version_column() -> bool:
+    with engine.begin() as connection:
+        exists = connection.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='users'
+                  AND column_name='token_version'
+                """
+            )
+        ).first()
+        if exists:
+            return False
+        connection.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0 NOT NULL"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS idx_users_token_version ON users(token_version)"))
+    logger.info("schema_repair_token_version_applied")
+    return True
 
 
 def _is_scan_path(path: str) -> bool:
@@ -37,10 +71,7 @@ def _scan_error_payload(exc: HTTPException) -> dict:
     return {"success": False, "error": "SCAN_BAD_REQUEST", "message": message}
 
 
-app = FastAPI(
-    title="GO Suraksha API",
-    version="1.0.0",
-)
+app = FastAPI(title="GO Suraksha API", version="1.0.0")
 
 
 @app.get("/test-push")
@@ -48,21 +79,11 @@ def test_push(token: str = Query(..., min_length=20)):
     if (os.getenv("ENABLE_TEST_PUSH") or "false").strip().lower() != "true":
         raise HTTPException(status_code=404, detail="Not found")
     try:
-        message_id = send_push_notification(
-            token=token,
-            title="GO Suraksha Test",
-            body="Push notifications working",
-        )
-        return {
-            "status": "push_sent",
-            "message_id": message_id,
-        }
+        message_id = send_push_notification(token=token, title="GO Suraksha Test", body="Push notifications working")
+        return {"status": "push_sent", "message_id": message_id}
     except Exception as exc:
         logger.exception("test_push_failed")
-        return {
-            "status": "error",
-            "error": str(exc),
-        }
+        return {"status": "error", "error": str(exc)}
 
 
 @app.exception_handler(HTTPException)
@@ -77,14 +98,7 @@ async def scan_http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def scan_validation_exception_handler(request: Request, exc: RequestValidationError):
     if _is_scan_path(request.url.path):
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error": "SCAN_BAD_REQUEST",
-                "message": "Invalid scan request.",
-            },
-        )
+        return JSONResponse(status_code=400, content={"success": False, "error": "SCAN_BAD_REQUEST", "message": "Invalid scan request."})
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
@@ -92,14 +106,7 @@ app.add_middleware(SecurityLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 configured_origins = os.getenv("CORS_ORIGINS", "").strip()
-if configured_origins:
-    allow_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
-else:
-    allow_origins = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ]
-
+allow_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()] if configured_origins else ["http://localhost:3000", "http://127.0.0.1:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -114,10 +121,12 @@ def startup():
     logger.info("startup_begin")
 
     from app.services.cyber_card import ensure_cyber_card_indexes
-    from app.services.reality_detection.engine import validate_runtime_dependencies
     from app.services.device_service import ensure_user_devices_table
+    from app.services.reality_detection.engine import validate_runtime_dependencies
     from app.services.scan_jobs import ensure_scan_jobs_table
 
+    run_startup_migrations()
+    ensure_token_version_column()
     validate_runtime_dependencies()
     ensure_cyber_card_indexes()
     ensure_scan_jobs_table()
@@ -212,8 +221,4 @@ app.include_router(webhooks_router)
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "ok",
-        "service": "go-suraksha-backend",
-        "version": "1.0.0",
-    }
+    return {"status": "ok", "service": "go-suraksha-backend", "version": "1.0.0"}

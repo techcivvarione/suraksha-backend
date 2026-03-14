@@ -17,7 +17,7 @@ from google.oauth2 import id_token
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.features import TIER_FREE
@@ -92,7 +92,6 @@ def rate_limit(key: str, db: Session) -> None:
     namespaced_key = f"gosuraksha:rate:auth:{key_hash}"
     now = datetime.now(tz=timezone.utc)
     window_start = now - timedelta(seconds=WINDOW_SECONDS)
-
     count = db.execute(
         text(
             """
@@ -104,10 +103,8 @@ def rate_limit(key: str, db: Session) -> None:
         ),
         {"key": namespaced_key, "window_start": window_start},
     ).scalar()
-
     if count >= MAX_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
-
     db.execute(text("INSERT INTO auth_rate_limits (key) VALUES (:key)"), {"key": namespaced_key})
     db.commit()
 
@@ -135,6 +132,10 @@ def _normalize_email(email: EmailStr) -> str:
     return email.strip().lower()
 
 
+def _effective_token_version(user: User | object) -> int:
+    return int(getattr(user, "token_version", 0) or 0)
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -155,17 +156,20 @@ def validate_password_strength(password: str) -> None:
 
 
 def invalidate_user_sessions(user: User) -> None:
-    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+    user.token_version = _effective_token_version(user) + 1
     user.updated_at = datetime.utcnow()
 
 
 def create_access_token(user: User) -> str:
     now = datetime.now(tz=timezone.utc)
+    token_version = _effective_token_version(user)
     payload = {
         "sub": str(user.id),
+        "user_id": str(user.id),
         "email": user.email,
         "plan": user.plan,
-        "tv": int(getattr(user, "token_version", 0) or 0),
+        "tv": token_version,
+        "token_version": token_version,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
     }
@@ -176,28 +180,41 @@ def _auth_error(error: str, message: str, status_code: int = 401) -> HTTPExcepti
     return HTTPException(status_code=status_code, detail={"success": False, "error": error, "message": message})
 
 
-def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-):
+def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     return _resolve_current_user(request=request, credentials=credentials, db=db, required=True)
 
 
-def get_current_user_optional(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
-    db: Session = Depends(get_db),
-):
+def get_current_user_optional(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional), db: Session = Depends(get_db)):
     return _resolve_current_user(request=request, credentials=credentials, db=db, required=False)
 
 
-def _resolve_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials],
-    db: Session,
-    required: bool,
-):
+def _load_user_with_token_version(db: Session, user_id: str) -> User | None:
+    row = (
+        db.query(User, func.coalesce(User.token_version, 0).label("effective_token_version"))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if not row:
+        return None
+    user, effective_token_version = row
+    user.token_version = int(effective_token_version or 0)
+    return user
+
+
+def _find_login_user(db: Session, identifier: str) -> User | None:
+    row = (
+        db.query(User, func.coalesce(User.token_version, 0).label("effective_token_version"))
+        .filter((User.email == identifier) | (User.phone_number == identifier))
+        .first()
+    )
+    if not row:
+        return None
+    user, effective_token_version = row
+    user.token_version = int(effective_token_version or 0)
+    return user
+
+
+def _resolve_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials], db: Session, required: bool):
     if credentials is None:
         if required:
             raise _auth_error("INVALID_TOKEN", "Invalid token")
@@ -205,25 +222,21 @@ def _resolve_current_user(
 
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
+        user_id = payload.get("user_id") or payload.get("sub")
         issued_at = payload.get("iat")
-        token_version = payload.get("tv")
-
+        token_version = payload.get("token_version", payload.get("tv"))
         if not user_id or issued_at is None or token_version is None:
             raise _auth_error("INVALID_TOKEN", "Invalid token")
 
-        user = db.query(User).filter(User.id == user_id).first()
+        user = _load_user_with_token_version(db, str(user_id))
         if not user:
             raise _auth_error("INVALID_TOKEN", "Invalid token")
-
-        if int(token_version) != int(getattr(user, "token_version", 0) or 0):
+        if int(token_version) != _effective_token_version(user):
             raise _auth_error("TOKEN_EXPIRED", "Token expired")
 
         if user.password_changed_at:
             issued_at_dt = datetime.fromtimestamp(int(issued_at), tz=timezone.utc)
-            pwd_changed = user.password_changed_at
-            if pwd_changed.tzinfo is None:
-                pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+            pwd_changed = user.password_changed_at if user.password_changed_at.tzinfo else user.password_changed_at.replace(tzinfo=timezone.utc)
             if issued_at_dt < pwd_changed:
                 raise _auth_error("TOKEN_EXPIRED", "Token expired")
 
@@ -244,14 +257,12 @@ def _resolve_current_user(
 def send_email_otp(payload: SendEmailOtpRequest, request: Request, db: Session = Depends(get_db)):
     normalized_email = _normalize_email(payload.email)
     client_ip = request.client.host or "unknown"
-
     if not (allow_email_send(normalized_email) and allow_ip_send(client_ip)):
         return GENERIC_SEND_RESPONSE
 
     otp = _generate_otp()
     otp_hash = _hash_otp(otp)
     expires_at = datetime.now(tz=timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
-
     with db.begin():
         existing = db.query(EmailOtp).with_for_update(nowait=False).filter(EmailOtp.email == normalized_email).one_or_none()
         if existing is None:
@@ -261,12 +272,10 @@ def send_email_otp(payload: SendEmailOtpRequest, request: Request, db: Session =
             existing.otp_expires_at = expires_at
             existing.otp_attempts = 0
             existing.otp_locked_until = None
-
     try:
         send_otp_email(email=normalized_email, otp=otp)
     except Exception:
         logger.exception("otp_email_send_failed")
-
     return GENERIC_SEND_RESPONSE
 
 
@@ -275,7 +284,6 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
     start_time = time.perf_counter()
     normalized_email = _normalize_email(payload.email)
     provided_otp = payload.otp.strip()
-
     if len(provided_otp) != OTP_LENGTH or not provided_otp.isdigit():
         _ensure_min_delay(start_time)
         return GENERIC_VERIFY_FAILURE
@@ -298,7 +306,6 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
         else:
             db.delete(record)
             response_payload = {"success": True}
-
     _ensure_min_delay(start_time)
     return response_payload
 
@@ -306,7 +313,6 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
 @router.post("/signup")
 def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"signup:{request.client.host}", db)
-
     if not payload.accepted_terms:
         raise HTTPException(status_code=400, detail="You must accept the Privacy Policy and Terms of Service to create an account.")
     if payload.password != payload.confirm_password:
@@ -350,26 +356,20 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
             {"uid": str(user.id), "email": user.email},
         )
         db.commit()
-
     return {"status": "signup_success"}
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     rate_limit(f"login:{request.client.host}", db)
-
-    user = db.query(User).filter((User.email == payload.identifier) | (User.phone_number == payload.identifier)).first()
+    user = _find_login_user(db, payload.identifier)
     if not user or not verify_password(payload.password, user.password_hash):
         create_audit_log(db=db, user_id=user.id if user else None, event_type="LOGIN_FAILED", event_description="Failed login attempt", request=request)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token(user)
     create_audit_log(db=db, user_id=user.id, event_type="LOGIN_SUCCESS", event_description="User logged in", request=request)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "needs_terms_acceptance": not bool(getattr(user, "accepted_terms", False)),
-    }
+    return {"access_token": token, "token_type": "bearer", "needs_terms_acceptance": not bool(getattr(user, "accepted_terms", False))}
 
 
 @router.post("/google")
@@ -385,51 +385,24 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
     name = idinfo.get("name") or (email.split("@")[0] if email else None)
     picture = idinfo.get("picture")
     email_verified = idinfo.get("email_verified")
-
     if not email or not email_verified:
         raise HTTPException(status_code=400, detail="Email not verified by Google")
 
-    user = db.query(User).filter(User.email == email).first()
+    user = _find_login_user(db, email)
     if not user:
         temp_pwd = secrets.token_hex(16)
-        user = User(
-            name=name or "Google User",
-            email=email,
-            phone_number=None,
-            plan="FREE",
-            auth_provider="google",
-            password_hash=hash_password(temp_pwd),
-            password_changed_at=datetime.now(tz=timezone.utc),
-            token_version=0,
-        )
+        user = User(name=name or "Google User", email=email, phone_number=None, plan="FREE", auth_provider="google", password_hash=hash_password(temp_pwd), password_changed_at=datetime.now(tz=timezone.utc), token_version=0)
         db.add(user)
         db.commit()
         db.refresh(user)
-
     token = create_access_token(user)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {
-            "id": str(user.id),
-            "name": user.name,
-            "email": user.email,
-            "phone_number": user.phone_number,
-            "plan": user.plan,
-            "auth_provider": getattr(user, "auth_provider", "google"),
-            "picture": picture,
-        },
+        "user": {"id": str(user.id), "name": user.name, "email": user.email, "phone_number": user.phone_number, "plan": user.plan, "auth_provider": getattr(user, "auth_provider", "google"), "picture": picture},
     }
 
 
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "name": current_user.name,
-        "email": current_user.email,
-        "phone_number": current_user.phone_number,
-        "plan": current_user.plan,
-        "subscription_status": current_user.subscription_status,
-        "subscription_expires_at": current_user.subscription_expires_at,
-    }
+    return {"id": current_user.id, "name": current_user.name, "email": current_user.email, "phone_number": current_user.phone_number, "plan": current_user.plan, "subscription_status": current_user.subscription_status, "subscription_expires_at": current_user.subscription_expires_at}

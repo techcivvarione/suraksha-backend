@@ -7,7 +7,6 @@ Create Date: 2026-03-14 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision = "20260314_01"
 down_revision = None
@@ -16,9 +15,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    user_indexes = {index["name"] for index in inspector.get_indexes("users")}
+
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
 
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0")
+    if "token_version" not in user_columns:
+        op.add_column("users", sa.Column("token_version", sa.Integer(), nullable=False, server_default="0"))
+    if "idx_users_token_version" not in user_indexes:
+        op.create_index("idx_users_token_version", "users", ["token_version"])
+
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms BOOLEAN DEFAULT FALSE")
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_at TIMESTAMPTZ NULL")
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT")
@@ -87,6 +95,7 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS subscription_events")
     op.execute("DROP INDEX IF EXISTS idx_auth_rate_limits_key_time")
     op.execute("DROP TABLE IF EXISTS auth_rate_limits")
+    op.execute("DROP INDEX IF EXISTS idx_users_token_version")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS privacy_version")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS terms_version")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS accepted_terms_at")
