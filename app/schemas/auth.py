@@ -22,3 +22,17 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str
     needs_terms_acceptance: bool
+
+
+class AuthMeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    phone: Optional[str] = None
+    plan: Optional[str] = None
+    profile_image_url: Optional[str] = None
+    subscription_status: Optional[str] = None
+    subscription_expires_at: Optional[str] = None

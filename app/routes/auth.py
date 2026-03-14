@@ -24,7 +24,7 @@ from app.core.features import TIER_FREE
 from app.db import get_db
 from app.models.email_otp import EmailOtp
 from app.models.user import User
-from app.schemas.auth import LoginResponse, SignupRequest
+from app.schemas.auth import AuthMeResponse, LoginResponse, SignupRequest
 from app.services.audit_logger import create_audit_log
 from app.services.email_otp_rate_limiter import allow_email_send, allow_ip_send
 from app.services.email_service import send_otp_email
@@ -403,6 +403,19 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
     }
 
 
-@router.get("/me")
+@router.get("/me", response_model=AuthMeResponse)
 def me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "name": current_user.name, "email": current_user.email, "phone_number": current_user.phone_number, "plan": current_user.plan, "subscription_status": current_user.subscription_status, "subscription_expires_at": current_user.subscription_expires_at}
+    phone_number = getattr(current_user, "phone_number", None)
+    subscription_expires_at = getattr(current_user, "subscription_expires_at", None)
+    return {
+        "id": str(current_user.id),
+        "name": getattr(current_user, "name", None),
+        "email": getattr(current_user, "email", None),
+        "phone_number": phone_number,
+        "phone": phone_number,
+        "plan": getattr(current_user, "plan", None),
+        "profile_image_url": getattr(current_user, "profile_image_url", None),
+        "subscription_status": getattr(current_user, "subscription_status", None),
+        "subscription_expires_at": subscription_expires_at.isoformat() if hasattr(subscription_expires_at, "isoformat") and subscription_expires_at is not None else subscription_expires_at,
+    }
+
