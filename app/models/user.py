@@ -31,6 +31,7 @@ class User(Base):
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
 
     preferred_language = Column(String, nullable=False, default="en", server_default="en")
+    profile_image_url = Column(String, nullable=True)
     ai_image_lifetime_used = Column(Integer, nullable=False, default=0, server_default="0")
     first_upgrade_used = Column(Boolean, nullable=False, default=False, server_default="false")
     accepted_terms = Column(Boolean, nullable=False, default=False, server_default="false")
