@@ -136,3 +136,5 @@ class ScamRadarEvent(BaseModel):
 
 class ScamRadarLiveResponse(BaseModel):
     events: list[ScamRadarEvent]
+    count: int
+    timestamp: datetime
