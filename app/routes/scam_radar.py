@@ -36,12 +36,32 @@ def _fetch_live_radar_events() -> list[dict]:
         rows = db.execute(
             text(
                 """
-                SELECT latitude,
-                       longitude,
-                       category,
-                       source
-                FROM scan_events
-                WHERE created_at > now() - interval '10 minutes'
+                SELECT latitude, longitude, category, source, created_at
+                FROM (
+                    SELECT
+                        latitude,
+                        longitude,
+                        category,
+                        source,
+                        created_at
+                    FROM scan_events
+                    WHERE created_at > now() - interval '30 minutes'
+                      AND latitude IS NOT NULL
+                      AND longitude IS NOT NULL
+
+                    UNION ALL
+
+                    SELECT
+                        latitude,
+                        longitude,
+                        category,
+                        source,
+                        created_at
+                    FROM scam_events
+                    WHERE created_at > now() - interval '30 minutes'
+                      AND latitude IS NOT NULL
+                      AND longitude IS NOT NULL
+                ) radar_events
                 ORDER BY created_at DESC
                 LIMIT 500
                 """
@@ -49,8 +69,8 @@ def _fetch_live_radar_events() -> list[dict]:
         ).mappings().all()
         return [
             {
-                "lat": float(row["latitude"]) if row["latitude"] is not None else None,
-                "lng": float(row["longitude"]) if row["longitude"] is not None else None,
+                "lat": float(row["latitude"]),
+                "lng": float(row["longitude"]),
                 "category": row["category"],
                 "source": row["source"],
             }

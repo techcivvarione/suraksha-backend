@@ -40,7 +40,7 @@ def fetch_heatmap_points(
             "lat": float(row["lat"]),
             "lng": float(row["lng"]),
             "count": int(row["count"] or 0),
-            "verified": True,
+            "verified": bool(row["verified"]),
             "category_breakdown": {
                 str(key): int(value)
                 for key, value in dict(row["category_breakdown"] or {}).items()
@@ -124,8 +124,22 @@ def _global_query() -> str:
             SELECT
                 ROUND(latitude::numeric, 2) AS lat,
                 ROUND(longitude::numeric, 2) AS lng,
-                COALESCE(category, 'unknown') AS category
+                COALESCE(category, 'unknown') AS category,
+                TRUE AS verified
             FROM scam_reports
+            WHERE latitude IS NOT NULL
+              AND longitude IS NOT NULL
+              AND created_at >= :since
+              AND (:category IS NULL OR category = :category)
+
+            UNION ALL
+
+            SELECT
+                ROUND(latitude::numeric, 2) AS lat,
+                ROUND(longitude::numeric, 2) AS lng,
+                COALESCE(category, 'unknown') AS category,
+                FALSE AS verified
+            FROM scam_events
             WHERE latitude IS NOT NULL
               AND longitude IS NOT NULL
               AND created_at >= :since
@@ -136,7 +150,8 @@ def _global_query() -> str:
                 lat,
                 lng,
                 category,
-                COUNT(*) AS category_count
+                COUNT(*) AS category_count,
+                BOOL_OR(verified) AS verified
             FROM filtered
             GROUP BY lat, lng, category
         ),
@@ -144,7 +159,8 @@ def _global_query() -> str:
             SELECT
                 lat,
                 lng,
-                SUM(category_count) AS count
+                SUM(category_count) AS count,
+                BOOL_OR(verified) AS verified
             FROM category_counts
             GROUP BY lat, lng
         ),
@@ -153,6 +169,7 @@ def _global_query() -> str:
                 lat,
                 lng,
                 count,
+                verified,
                 ROW_NUMBER() OVER (ORDER BY count DESC, lat, lng) AS point_rank
             FROM point_totals
         )
@@ -160,12 +177,13 @@ def _global_query() -> str:
             rp.lat,
             rp.lng,
             rp.count,
+            rp.verified,
             JSONB_OBJECT_AGG(cc.category, cc.category_count) AS category_breakdown
         FROM ranked_points rp
         JOIN category_counts cc
           ON cc.lat = rp.lat AND cc.lng = rp.lng
         WHERE rp.point_rank <= :limit
-        GROUP BY rp.lat, rp.lng, rp.count
+        GROUP BY rp.lat, rp.lng, rp.count, rp.verified
         ORDER BY rp.count DESC, rp.lat, rp.lng
     """
 
@@ -223,6 +241,7 @@ def _regional_query(
             rr.lat,
             rr.lng,
             rr.count,
+            TRUE AS verified,
             JSONB_OBJECT_AGG(cc.category, cc.category_count) AS category_breakdown
         FROM ranked_regions rr
         JOIN category_counts cc
@@ -231,5 +250,3 @@ def _regional_query(
         GROUP BY {group_by_columns}
         ORDER BY rr.count DESC, rr.lat, rr.lng
     """
-
-

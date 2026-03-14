@@ -116,6 +116,7 @@ def startup():
     from app.services.device_service import ensure_user_devices_table
     from app.services.scan_jobs import ensure_scan_jobs_table
     from app.jobs.scan_event_cleanup import start_scan_event_cleanup_worker
+    from app.jobs.threat_ingestion_job import start_threat_ingestion_worker
 
     validate_runtime_dependencies()
     ensure_user_terms_columns()
@@ -124,6 +125,7 @@ def startup():
     ensure_scan_jobs_table()
     ensure_user_devices_table()
     start_scan_event_cleanup_worker()
+    start_threat_ingestion_worker()
 
     try:
         from app.services.news_ingestor import ingest_rss
@@ -245,5 +247,9 @@ def show_routes():
 @app.on_event("shutdown")
 def shutdown_background_workers():
     from app.jobs.scan_event_cleanup import stop_scan_event_cleanup_worker
+    from app.jobs.threat_ingestion_job import stop_threat_ingestion_worker
     stop_scan_event_cleanup_worker()
+    stop_threat_ingestion_worker()
+
+
 

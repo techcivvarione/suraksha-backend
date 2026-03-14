@@ -131,7 +131,7 @@ class ScamRadarEvent(BaseModel):
     lat: float | None = None
     lng: float | None = None
     category: str | None = None
-    source: Literal["scan", "report"]
+    source: str
 
 
 class ScamRadarLiveResponse(BaseModel):

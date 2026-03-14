@@ -62,6 +62,18 @@ def ensure_scam_network_tables() -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
                 """,
+                """
+                CREATE TABLE IF NOT EXISTS scam_events (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    latitude DOUBLE PRECISION,
+                    longitude DOUBLE PRECISION,
+                    category TEXT,
+                    severity INTEGER,
+                    reports INTEGER,
+                    source TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """,
             ]:
                 conn.execute(text(statement))
             conn.execute(
@@ -82,6 +94,9 @@ def ensure_scam_network_tables() -> None:
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_created ON scam_reports (created_at)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_reports_state ON scam_reports (state)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scan_events_created ON scan_events(created_at DESC)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_events_time ON scam_events(created_at)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_events_location ON scam_events(latitude, longitude)'))
+            conn.execute(text('CREATE INDEX IF NOT EXISTS idx_scam_events_source_time ON scam_events(source, created_at DESC)'))
             conn.execute(text('CREATE INDEX IF NOT EXISTS ix_attack_locations_window_geohash ON attack_locations (time_window, geohash)'))
             for category_id, slug, name, description in CATEGORY_SEEDS:
                 conn.execute(
