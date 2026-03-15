@@ -97,12 +97,15 @@ def test_upload_profile_photo_rejects_large_file(client):
 
     assert response.status_code == 413
     assert response.json()["detail"] == "File too large"
-def test_auth_me_returns_profile_image_url(client, token_users):
+
+
+def test_auth_me_returns_complete_restore_identity(client, token_users):
     user = token_users["free-token"]
     user.phone_number = "+919876543210"
     user.profile_image_url = "https://example.supabase.co/storage/v1/object/public/profile-pictures/profiles/profile_test.jpg"
     user.subscription_status = "ACTIVE"
     user.subscription_expires_at = None
+    user.token_version = 7
 
     response = client.get("/auth/me", headers={"Authorization": "Bearer free-token"})
 
@@ -112,3 +115,4 @@ def test_auth_me_returns_profile_image_url(client, token_users):
     assert body["phone_number"] == "+919876543210"
     assert body["phone"] == "+919876543210"
     assert body["profile_image_url"] == user.profile_image_url
+    assert body["token_version"] == 7

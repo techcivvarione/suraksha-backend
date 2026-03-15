@@ -51,6 +51,7 @@ OTP_LOCK_MINUTES = 15
 OTP_MIN_RESPONSE_MS = 300
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 60
+GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
@@ -128,8 +129,8 @@ def _compare_otp(stored_hash: str, provided_otp: str) -> bool:
     return hmac.compare_digest(stored_hash, _hash_otp(provided_otp))
 
 
-def _normalize_email(email: EmailStr) -> str:
-    return email.strip().lower()
+def _normalize_email(email: EmailStr | str) -> str:
+    return str(email).strip().lower()
 
 
 def _effective_token_version(user: User | object) -> int:
@@ -162,6 +163,8 @@ def invalidate_user_sessions(user: User) -> None:
 
 def create_access_token(user: User) -> str:
     now = datetime.now(tz=timezone.utc)
+    issued_at = int(now.timestamp())
+    expiration = int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp())
     token_version = _effective_token_version(user)
     payload = {
         "sub": str(user.id),
@@ -170,8 +173,10 @@ def create_access_token(user: User) -> str:
         "plan": user.plan,
         "tv": token_version,
         "token_version": token_version,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).timestamp()),
+        "iat": issued_at,
+        "issued_at": issued_at,
+        "exp": expiration,
+        "expiration": expiration,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -214,6 +219,50 @@ def _find_login_user(db: Session, identifier: str) -> User | None:
     return user
 
 
+def _find_user_by_google_sub(db: Session, google_sub: str) -> User | None:
+    return db.query(User).filter(User.google_sub == google_sub).first()
+
+
+def _find_user_by_email_exact(db: Session, email: str) -> User | None:
+    normalized_email = _normalize_email(email)
+    return db.query(User).filter(func.lower(User.email) == normalized_email).first()
+
+
+def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, name: str | None) -> User:
+    user = _find_user_by_google_sub(db, google_sub)
+    if user:
+        return user
+
+    existing_email_user = _find_user_by_email_exact(db, email) if email else None
+    if existing_email_user:
+        if getattr(existing_email_user, "auth_provider", None) == "google" and not getattr(existing_email_user, "google_sub", None):
+            existing_email_user.google_sub = google_sub
+            if name and not getattr(existing_email_user, "name", None):
+                existing_email_user.name = name
+            db.add(existing_email_user)
+            db.commit()
+            db.refresh(existing_email_user)
+            return existing_email_user
+        raise HTTPException(status_code=409, detail="Account already exists with this email. Sign in using the original method.")
+
+    temp_pwd = secrets.token_hex(16)
+    user = User(
+        name=name or "Google User",
+        email=email,
+        phone_number=None,
+        plan="FREE",
+        auth_provider="google",
+        google_sub=google_sub,
+        password_hash=hash_password(temp_pwd),
+        password_changed_at=datetime.now(tz=timezone.utc),
+        token_version=0,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def _resolve_current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials], db: Session, required: bool):
     if credentials is None:
         if required:
@@ -223,7 +272,7 @@ def _resolve_current_user(request: Request, credentials: Optional[HTTPAuthorizat
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("user_id") or payload.get("sub")
-        issued_at = payload.get("iat")
+        issued_at = payload.get("issued_at", payload.get("iat"))
         token_version = payload.get("token_version", payload.get("tv"))
         if not user_id or issued_at is None or token_version is None:
             raise _auth_error("INVALID_TOKEN", "Invalid token")
@@ -381,25 +430,33 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid Google token")
 
-    email = idinfo.get("email")
+    issuer = str(idinfo.get("iss") or "").strip()
+    google_sub = str(idinfo.get("sub") or "").strip()
+    email = _normalize_email(idinfo.get("email") or "")
     name = idinfo.get("name") or (email.split("@")[0] if email else None)
     picture = idinfo.get("picture")
-    email_verified = idinfo.get("email_verified")
+    email_verified = bool(idinfo.get("email_verified"))
+    if issuer not in GOOGLE_ISSUERS:
+        raise HTTPException(status_code=400, detail="Invalid Google token issuer")
+    if not google_sub:
+        raise HTTPException(status_code=400, detail="Invalid Google token subject")
     if not email or not email_verified:
         raise HTTPException(status_code=400, detail="Email not verified by Google")
 
-    user = _find_login_user(db, email)
-    if not user:
-        temp_pwd = secrets.token_hex(16)
-        user = User(name=name or "Google User", email=email, phone_number=None, plan="FREE", auth_provider="google", password_hash=hash_password(temp_pwd), password_changed_at=datetime.now(tz=timezone.utc), token_version=0)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    user = _resolve_google_user_identity(db, google_sub=google_sub, email=email, name=name)
     token = create_access_token(user)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user": {"id": str(user.id), "name": user.name, "email": user.email, "phone_number": user.phone_number, "plan": user.plan, "auth_provider": getattr(user, "auth_provider", "google"), "picture": picture},
+        "user": {
+            "id": str(user.id),
+            "name": user.name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "plan": user.plan,
+            "auth_provider": getattr(user, "auth_provider", "google"),
+            "picture": picture,
+        },
     }
 
 
@@ -415,7 +472,7 @@ def me(current_user: User = Depends(get_current_user)):
         "phone": phone_number,
         "plan": getattr(current_user, "plan", None),
         "profile_image_url": getattr(current_user, "profile_image_url", None),
+        "token_version": _effective_token_version(current_user),
         "subscription_status": getattr(current_user, "subscription_status", None),
         "subscription_expires_at": subscription_expires_at.isoformat() if hasattr(subscription_expires_at, "isoformat") and subscription_expires_at is not None else subscription_expires_at,
     }
-

@@ -19,6 +19,7 @@ class User(Base):
 
     password_hash = Column(String, nullable=False)
     auth_provider = Column(String, nullable=False, default="password")
+    google_sub = Column(String, nullable=True, unique=True, index=True)
     token_version = Column(Integer, nullable=False, default=0, server_default="0")
 
     plan = Column(String, nullable=False, default=UserPlan.FREE.value)

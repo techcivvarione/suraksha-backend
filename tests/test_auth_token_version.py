@@ -79,7 +79,7 @@ class _FakeEngine:
         return self.connection
 
 
-def test_create_access_token_embeds_token_version_fields():
+def test_create_access_token_embeds_identity_and_timestamps():
     user = SimpleNamespace(id="user-1", email="user@example.com", plan="FREE", token_version=3)
     token = auth.create_access_token(user)
     payload = jwt.get_unverified_claims(token)
@@ -87,6 +87,9 @@ def test_create_access_token_embeds_token_version_fields():
     assert payload["tv"] == 3
     assert payload["user_id"] == "user-1"
     assert payload["sub"] == "user-1"
+    assert payload["issued_at"] == payload["iat"]
+    assert payload["expiration"] == payload["exp"]
+    assert payload["expiration"] > payload["issued_at"]
 
 
 def test_login_path_handles_existing_token_version(monkeypatch):

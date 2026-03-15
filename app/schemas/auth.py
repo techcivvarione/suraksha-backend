@@ -34,5 +34,6 @@ class AuthMeResponse(BaseModel):
     phone: Optional[str] = None
     plan: Optional[str] = None
     profile_image_url: Optional[str] = None
+    token_version: int = 0
     subscription_status: Optional[str] = None
     subscription_expires_at: Optional[str] = None
