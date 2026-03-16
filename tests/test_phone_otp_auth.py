@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -102,3 +103,51 @@ def test_verify_phone_otp_flow_creates_user(db_session):
     assert user.phone_number == "919876543210"
     assert user.phone_verified is True
     assert db_session.query(PhoneOtp).count() == 0
+
+
+def test_verify_phone_otp_flow_reuses_existing_user(db_session):
+    existing_user = User(
+        name="Existing",
+        email="existing@example.com",
+        email_verified=True,
+        phone_number="919876543210",
+        phone_verified=False,
+        password_hash="hash",
+        auth_provider="email",
+        plan="FREE",
+        subscription_status="ACTIVE",
+        token_version=0,
+    )
+    db_session.add(existing_user)
+    db_session.commit()
+
+    user = auth._resolve_phone_user_identity(db_session, phone="919876543210")
+
+    assert user.id == existing_user.id
+    assert user.phone_verified is True
+    assert user.auth_provider == "phone"
+
+
+def test_verify_phone_otp_links_authenticated_google_user_without_creating_duplicate(db_session):
+    existing_google_user = User(
+        name="Google User",
+        email="google@example.com",
+        email_verified=True,
+        phone_number=None,
+        phone_verified=False,
+        password_hash="hash",
+        auth_provider="google",
+        google_sub="google-sub-1",
+        plan="FREE",
+        subscription_status="ACTIVE",
+        token_version=0,
+    )
+    db_session.add(existing_google_user)
+    db_session.commit()
+
+    user = auth._resolve_phone_user_identity(db_session, phone="919876543210", current_user=existing_google_user)
+
+    assert user.id == existing_google_user.id
+    assert user.phone_number == "919876543210"
+    assert user.phone_verified is True
+    assert db_session.query(User).count() == 1

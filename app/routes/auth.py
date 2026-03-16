@@ -23,10 +23,10 @@ from sqlalchemy.orm import Session
 from app.core.features import TIER_FREE, normalize_plan
 from app.db import get_db
 from app.models.email_otp import EmailOtp
-from app.models.phone_otp import PhoneOtp
 from app.models.user import User
 from app.schemas.auth import (
     AuthMeResponse,
+    GoogleLoginRequest,
     LoginResponse,
     SendPhoneOtpRequest,
     SignupRequest,
@@ -64,7 +64,7 @@ GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
@@ -138,8 +138,11 @@ def _compare_otp(stored_hash: str, provided_otp: str) -> bool:
     return hmac.compare_digest(stored_hash, _hash_otp(provided_otp))
 
 
-def _normalize_email(email: EmailStr | str) -> str:
-    return str(email).strip().lower()
+def _normalize_email(email: EmailStr | str | None) -> str | None:
+    if email is None:
+        return None
+    normalized = str(email).strip().lower()
+    return normalized or None
 
 
 def _effective_token_version(user: User | object) -> int:
@@ -191,7 +194,27 @@ def create_access_token(user: User) -> str:
 
 
 def _auth_error(error: str, message: str, status_code: int = 401) -> HTTPException:
-    return HTTPException(status_code=status_code, detail={"success": False, "error": error, "message": message})
+    return HTTPException(status_code=status_code, detail={"error_code": error, "message": message})
+
+
+def _touch_last_login(db: Session, user: User, provider: str) -> User:
+    user.last_login = datetime.now(tz=timezone.utc)
+    user.auth_provider = provider
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _token_response(user: User, *, needs_phone_verification: bool, include_terms: bool = False) -> dict:
+    payload = {
+        "access_token": create_access_token(user),
+        "token_type": "bearer",
+        "needs_phone_verification": needs_phone_verification,
+    }
+    if include_terms:
+        payload["needs_terms_acceptance"] = not bool(getattr(user, "accepted_terms", False))
+    return payload
 
 
 def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
@@ -215,48 +238,43 @@ def _load_user_with_token_version(db: Session, user_id: str) -> User | None:
     return user
 
 
-def _find_login_user(db: Session, identifier: str) -> User | None:
-    row = (
-        db.query(User, func.coalesce(User.token_version, 0).label("effective_token_version"))
-        .filter((User.email == identifier) | (User.phone_number == identifier))
-        .first()
-    )
-    if not row:
+def _find_user_by_email_exact(db: Session, email: str | None) -> User | None:
+    normalized_email = _normalize_email(email)
+    if not normalized_email:
         return None
-    user, effective_token_version = row
-    user.token_version = int(effective_token_version or 0)
-    return user
+    return db.query(User).filter(func.lower(User.email) == normalized_email).first()
+
+
+def _find_login_user(db: Session, identifier: str) -> User | None:
+    return _find_user_by_email_exact(db, identifier)
 
 
 def _find_user_by_google_sub(db: Session, google_sub: str) -> User | None:
     return db.query(User).filter(User.google_sub == google_sub).first()
 
 
-def _find_user_by_email_exact(db: Session, email: str) -> User | None:
-    normalized_email = _normalize_email(email)
-    return db.query(User).filter(func.lower(User.email) == normalized_email).first()
-
-
 def _find_user_by_phone_exact(db: Session, phone: str) -> User | None:
     return db.query(User).filter(User.phone_number == phone).first()
 
 
-def _resolve_phone_user_identity(db: Session, *, phone: str) -> User:
+def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User | None = None) -> User:
     user = _find_user_by_phone_exact(db, phone)
     if user:
+        user.phone_number = phone
         user.phone_verified = True
-        if not getattr(user, "auth_provider", None):
-            user.auth_provider = "phone"
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
+        return _touch_last_login(db, user, "phone")
+
+    if current_user is not None:
+        current_user.phone_number = phone
+        current_user.phone_verified = True
+        return _touch_last_login(db, current_user, current_user.auth_provider or "phone")
 
     temp_pwd = secrets.token_hex(16)
     now = datetime.now(tz=timezone.utc)
     user = User(
         name=f"User {phone[-4:]}",
         email=None,
+        email_verified=False,
         phone_number=phone,
         phone_verified=True,
         plan=TIER_FREE,
@@ -266,6 +284,7 @@ def _resolve_phone_user_identity(db: Session, *, phone: str) -> User:
         password_hash=hash_password(temp_pwd),
         password_changed_at=now,
         token_version=0,
+        last_login=now,
     )
     db.add(user)
     db.commit()
@@ -276,31 +295,39 @@ def _resolve_phone_user_identity(db: Session, *, phone: str) -> User:
 def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, name: str | None) -> User:
     user = _find_user_by_google_sub(db, google_sub)
     if user:
-        return user
+        if email and not getattr(user, "email", None):
+            user.email = email
+        user.email_verified = True
+        if name and not getattr(user, "name", None):
+            user.name = name
+        return _touch_last_login(db, user, "google")
 
-    existing_email_user = _find_user_by_email_exact(db, email) if email else None
+    existing_email_user = _find_user_by_email_exact(db, email)
     if existing_email_user:
-        if getattr(existing_email_user, "auth_provider", None) == "google" and not getattr(existing_email_user, "google_sub", None):
-            existing_email_user.google_sub = google_sub
-            if name and not getattr(existing_email_user, "name", None):
-                existing_email_user.name = name
-            db.add(existing_email_user)
-            db.commit()
-            db.refresh(existing_email_user)
-            return existing_email_user
-        raise HTTPException(status_code=409, detail="Account already exists with this email. Sign in using the original method.")
+        existing_email_user.google_sub = google_sub
+        existing_email_user.email = email
+        existing_email_user.email_verified = True
+        if name and not getattr(existing_email_user, "name", None):
+            existing_email_user.name = name
+        return _touch_last_login(db, existing_email_user, "google")
 
     temp_pwd = secrets.token_hex(16)
+    now = datetime.now(tz=timezone.utc)
     user = User(
         name=name or "Google User",
         email=email,
+        email_verified=True,
         phone_number=None,
-        plan="FREE",
+        phone_verified=False,
+        plan=TIER_FREE,
+        subscription_status="ACTIVE",
+        subscription_expires_at=None,
         auth_provider="google",
         google_sub=google_sub,
         password_hash=hash_password(temp_pwd),
-        password_changed_at=datetime.now(tz=timezone.utc),
+        password_changed_at=now,
         token_version=0,
+        last_login=now,
     )
     db.add(user)
     db.commit()
@@ -420,12 +447,17 @@ def send_phone_otp(payload: SendPhoneOtpRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/verify-phone-otp")
-def verify_phone_otp_login(payload: VerifyPhoneOtpRequest, request: Request, db: Session = Depends(get_db)):
+def verify_phone_otp_login(
+    payload: VerifyPhoneOtpRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
     normalized_phone = verify_phone_otp(db, payload.phone, payload.otp)
-    user = _resolve_phone_user_identity(db, phone=normalized_phone)
-    token = create_access_token(user)
+    user = _resolve_phone_user_identity(db, phone=normalized_phone, current_user=current_user)
+    logger.info("auth.phone_login", extra={"user_id": str(user.id), "phone_suffix": normalized_phone[-4:]})
     create_audit_log(db=db, user_id=user.id, event_type="PHONE_OTP_LOGIN_SUCCESS", event_description="User logged in with phone OTP", request=request)
-    return {"access_token": token, "token_type": "bearer"}
+    return _token_response(user, needs_phone_verification=False)
 
 
 @router.post("/signup")
@@ -437,18 +469,23 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
     validate_password_strength(payload.password)
-    exists = db.query(User).filter((User.email == payload.email) | (User.phone_number == payload.phone_number)).first()
+    normalized_email = _normalize_email(payload.email)
+    normalized_phone = normalize_phone(payload.phone or payload.phone_number or "")
+    exists = db.query(User).filter((func.lower(User.email) == normalized_email) | (User.phone_number == normalized_phone)).first()
     if exists:
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise HTTPException(status_code=400, detail={"error_code": "DUPLICATE_ACCOUNT", "message": "User already exists"})
 
     now = datetime.now(tz=timezone.utc)
     user = User(
         name=payload.name,
-        email=payload.email,
-        phone_number=payload.phone_number,
+        email=normalized_email,
+        email_verified=False,
+        phone_number=normalized_phone,
+        phone_verified=False,
         plan=TIER_FREE,
         subscription_status="ACTIVE",
         subscription_expires_at=None,
+        auth_provider="email",
         password_hash=hash_password(payload.password),
         password_changed_at=now,
         accepted_terms=True,
@@ -456,6 +493,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         terms_version=payload.terms_version or "v1",
         privacy_version=payload.privacy_version or "v1",
         token_version=0,
+        last_login=None,
     )
     db.add(user)
     db.commit()
@@ -474,6 +512,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
             {"uid": str(user.id), "email": user.email},
         )
         db.commit()
+    logger.info("auth.signup", extra={"user_id": str(user.id)})
     return {"status": "signup_success"}
 
 
@@ -483,50 +522,56 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     user = _find_login_user(db, payload.identifier)
     if not user or not verify_password(payload.password, user.password_hash):
         create_audit_log(db=db, user_id=user.id if user else None, event_type="LOGIN_FAILED", event_description="Failed login attempt", request=request)
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail={"error_code": "INVALID_CREDENTIALS", "message": "Invalid credentials"})
 
-    token = create_access_token(user)
+    if not bool(getattr(user, "phone_verified", False)):
+        raise HTTPException(status_code=403, detail={"error_code": "PHONE_VERIFICATION_REQUIRED", "message": "Phone verification required"})
+
+    user = _touch_last_login(db, user, "email")
+    logger.info("auth.email_login", extra={"user_id": str(user.id)})
     create_audit_log(db=db, user_id=user.id, event_type="LOGIN_SUCCESS", event_description="User logged in", request=request)
-    return {"access_token": token, "token_type": "bearer", "needs_terms_acceptance": not bool(getattr(user, "accepted_terms", False))}
+    return _token_response(user, needs_phone_verification=False, include_terms=True)
 
 
-@router.post("/google")
-def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depends(get_db)):
+def _verify_google_identity_token(token_value: str) -> dict:
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="Google auth not configured")
+        raise HTTPException(status_code=503, detail={"error_code": "GOOGLE_AUTH_NOT_CONFIGURED", "message": "Google auth not configured"})
     try:
-        idinfo = id_token.verify_oauth2_token(payload.id_token, google_requests.Request(), GOOGLE_CLIENT_ID)
+        idinfo = id_token.verify_oauth2_token(token_value, google_requests.Request(), GOOGLE_CLIENT_ID)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Google token")
+        raise HTTPException(status_code=400, detail={"error_code": "INVALID_GOOGLE_TOKEN", "message": "Invalid Google token"})
 
     issuer = str(idinfo.get("iss") or "").strip()
     google_sub = str(idinfo.get("sub") or "").strip()
     email = _normalize_email(idinfo.get("email") or "")
     name = idinfo.get("name") or (email.split("@")[0] if email else None)
-    picture = idinfo.get("picture")
     email_verified = bool(idinfo.get("email_verified"))
     if issuer not in GOOGLE_ISSUERS:
-        raise HTTPException(status_code=400, detail="Invalid Google token issuer")
+        raise HTTPException(status_code=400, detail={"error_code": "INVALID_GOOGLE_TOKEN", "message": "Invalid Google token issuer"})
     if not google_sub:
-        raise HTTPException(status_code=400, detail="Invalid Google token subject")
+        raise HTTPException(status_code=400, detail={"error_code": "INVALID_GOOGLE_TOKEN", "message": "Invalid Google token subject"})
     if not email or not email_verified:
-        raise HTTPException(status_code=400, detail="Email not verified by Google")
+        raise HTTPException(status_code=400, detail={"error_code": "INVALID_GOOGLE_TOKEN", "message": "Email not verified by Google"})
+    return {"google_sub": google_sub, "email": email, "name": name}
 
-    user = _resolve_google_user_identity(db, google_sub=google_sub, email=email, name=name)
-    token = create_access_token(user)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": {
-            "id": str(user.id),
-            "name": user.name,
-            "email": user.email,
-            "phone_number": user.phone_number,
-            "plan": user.plan,
-            "auth_provider": getattr(user, "auth_provider", "google"),
-            "picture": picture,
-        },
-    }
+
+def _handle_google_login(*, google_token: str, request: Request, db: Session) -> dict:
+    identity = _verify_google_identity_token(google_token)
+    user = _resolve_google_user_identity(db, **identity)
+    needs_phone_verification = not bool(getattr(user, "phone_verified", False))
+    logger.info("auth.google_login", extra={"user_id": str(user.id), "needs_phone_verification": needs_phone_verification})
+    create_audit_log(db=db, user_id=user.id, event_type="GOOGLE_LOGIN_SUCCESS", event_description="User logged in with Google", request=request)
+    return _token_response(user, needs_phone_verification=needs_phone_verification)
+
+
+@router.post("/google-login")
+def google_login(payload: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
+    return _handle_google_login(google_token=payload.google_id_token, request=request, db=db)
+
+
+@router.post("/google")
+def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depends(get_db)):
+    return _handle_google_login(google_token=payload.id_token, request=request, db=db)
 
 
 @router.get("/me", response_model=AuthMeResponse)
@@ -547,4 +592,3 @@ def me(current_user: User = Depends(get_current_user)):
         "subscription_status": subscription_status,
         "subscription_expires_at": subscription_expires_at.isoformat() if hasattr(subscription_expires_at, "isoformat") and subscription_expires_at is not None else None,
     }
-

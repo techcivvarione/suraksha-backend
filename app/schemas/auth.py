@@ -11,6 +11,7 @@ class SignupRequest(BaseModel):
     name: str
     email: Optional[str]
     phone_number: Optional[str]
+    phone: Optional[str] = None
     password: str
     confirm_password: str
     accepted_terms: bool
@@ -21,7 +22,8 @@ class SignupRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str
-    needs_terms_acceptance: bool
+    needs_phone_verification: bool = False
+    needs_terms_acceptance: bool | None = None
 
 
 class AuthMeResponse(BaseModel):
@@ -50,3 +52,9 @@ class VerifyPhoneOtpRequest(BaseModel):
 
     phone: str
     otp: str
+
+
+class GoogleLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    google_id_token: str

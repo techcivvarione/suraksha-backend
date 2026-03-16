@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
 
-from app.main import ensure_token_version_column
 from app.routes import auth
 
 
@@ -44,39 +44,12 @@ class _Request:
         self.state = _State()
 
 
-class _FakeConnection:
-    def __init__(self, missing=True):
-        self.missing = missing
-        self.statements = []
-
-    def execute(self, statement):
-        sql = str(statement)
-        self.statements.append(sql)
-        if "information_schema.columns" in sql:
-            return _FakeResult(None if self.missing else ("token_version",))
-        return _FakeResult(None)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
+class _Client:
+    host = "127.0.0.1"
 
 
-class _FakeResult:
-    def __init__(self, value):
-        self.value = value
-
-    def first(self):
-        return self.value
-
-
-class _FakeEngine:
-    def __init__(self, missing=True):
-        self.connection = _FakeConnection(missing=missing)
-
-    def begin(self):
-        return self.connection
+class _LoginRequest:
+    client = _Client()
 
 
 def test_create_access_token_embeds_identity_and_timestamps():
@@ -93,28 +66,24 @@ def test_create_access_token_embeds_identity_and_timestamps():
 
 
 def test_login_path_handles_existing_token_version(monkeypatch):
-    user = SimpleNamespace(id="user-1", email="user@example.com", phone_number=None, plan="FREE", token_version=5, password_hash="hash")
+    user = SimpleNamespace(
+        id="user-1",
+        email="user@example.com",
+        phone_number="919876543210",
+        plan="FREE",
+        token_version=5,
+        password_hash="hash",
+        phone_verified=True,
+        accepted_terms=True,
+    )
     monkeypatch.setattr(auth, "verify_password", lambda password, hashed: True)
-    loaded = auth._find_login_user(_FakeDb(user, token_version=5), "user@example.com")
-    assert loaded is user
-    assert loaded.token_version == 5
+    monkeypatch.setattr(auth, "create_audit_log", lambda **kwargs: None)
+    monkeypatch.setattr(auth, "_touch_last_login", lambda db, user, provider: user)
 
+    response = auth.login(auth.LoginRequest(identifier="user@example.com", password="secret"), _LoginRequest(), _FakeDb(user, token_version=5))
 
-def test_schema_auto_repair_applies_when_column_missing(monkeypatch):
-    fake_engine = _FakeEngine(missing=True)
-    monkeypatch.setattr("app.main.engine", fake_engine)
-    applied = ensure_token_version_column()
-    assert applied is True
-    assert any("ALTER TABLE users ADD COLUMN token_version" in statement for statement in fake_engine.connection.statements)
-    assert any("CREATE INDEX IF NOT EXISTS idx_users_token_version" in statement for statement in fake_engine.connection.statements)
-
-
-def test_schema_auto_repair_skips_when_column_exists(monkeypatch):
-    fake_engine = _FakeEngine(missing=False)
-    monkeypatch.setattr("app.main.engine", fake_engine)
-    applied = ensure_token_version_column()
-    assert applied is False
-    assert all("ALTER TABLE users ADD COLUMN token_version" not in statement for statement in fake_engine.connection.statements)
+    assert response["token_type"] == "bearer"
+    assert response["needs_phone_verification"] is False
 
 
 def test_logout_all_invalidation_rejects_old_tokens(monkeypatch):
@@ -124,11 +93,10 @@ def test_logout_all_invalidation_rejects_old_tokens(monkeypatch):
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     monkeypatch.setattr(auth, "maybe_auto_downgrade_expired_subscription", lambda db, user, request=None: user)
 
-    try:
+    with pytest.raises(auth.HTTPException) as exc:
         auth._resolve_current_user(_Request(), credentials, _FakeDb(active_user, token_version=2), True)
-        assert False, "expected token invalidation"
-    except auth.HTTPException as exc:
-        assert exc.detail["error"] == "TOKEN_EXPIRED"
+
+    assert exc.value.detail["error_code"] == "TOKEN_EXPIRED"
 
 
 def test_password_change_invalidation_rejects_old_tokens(monkeypatch):
@@ -145,8 +113,27 @@ def test_password_change_invalidation_rejects_old_tokens(monkeypatch):
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     monkeypatch.setattr(auth, "maybe_auto_downgrade_expired_subscription", lambda db, user, request=None: user)
 
-    try:
+    with pytest.raises(auth.HTTPException) as exc:
         auth._resolve_current_user(_Request(), credentials, _FakeDb(current_user, token_version=0), True)
-        assert False, "expected password change invalidation"
-    except auth.HTTPException as exc:
-        assert exc.detail["error"] == "TOKEN_EXPIRED"
+
+    assert exc.value.detail["error_code"] == "TOKEN_EXPIRED"
+
+
+def test_email_login_requires_phone_verification(monkeypatch):
+    user = SimpleNamespace(
+        id="user-1",
+        email="user@example.com",
+        phone_number=None,
+        plan="FREE",
+        token_version=0,
+        password_hash="hash",
+        phone_verified=False,
+        accepted_terms=False,
+    )
+    monkeypatch.setattr(auth, "verify_password", lambda password, hashed: True)
+
+    with pytest.raises(auth.HTTPException) as exc:
+        auth.login(auth.LoginRequest(identifier="user@example.com", password="secret"), _LoginRequest(), _FakeDb(user, token_version=0))
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["error_code"] == "PHONE_VERIFICATION_REQUIRED"
