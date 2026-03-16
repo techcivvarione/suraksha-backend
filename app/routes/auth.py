@@ -64,7 +64,7 @@ GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
-pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
@@ -269,7 +269,7 @@ def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User 
         current_user.phone_verified = True
         return _touch_last_login(db, current_user, current_user.auth_provider or "phone")
 
-    temp_pwd = secrets.token_hex(16)
+    temp_pwd = secrets.token_urlsafe(32)
     now = datetime.now(tz=timezone.utc)
     user = User(
         name=f"User {phone[-4:]}",
@@ -311,7 +311,7 @@ def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, n
             existing_email_user.name = name
         return _touch_last_login(db, existing_email_user, "google")
 
-    temp_pwd = secrets.token_hex(16)
+    temp_pwd = secrets.token_urlsafe(32)
     now = datetime.now(tz=timezone.utc)
     user = User(
         name=name or "Google User",
