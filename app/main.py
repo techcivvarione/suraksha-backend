@@ -1,7 +1,5 @@
 import logging
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,11 +8,9 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 
 from app.core.logging_setup import configure_logging
 from app.core.monitoring import init_sentry
-from app.db import engine
 from app.middleware.security import SecurityLoggingMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.firebase_service import send_push_notification
@@ -24,36 +20,6 @@ load_dotenv(BASE_DIR / ".env")
 configure_logging()
 init_sentry()
 logger = logging.getLogger(__name__)
-
-
-def run_startup_migrations() -> None:
-    command = [sys.executable, "-m", "alembic", "upgrade", "head"]
-    result = subprocess.run(command, cwd=str(BASE_DIR), capture_output=True, text=True)
-    if result.returncode != 0:
-        logger.error("startup_migrations_failed", extra={"stderr": result.stderr[-1000:]})
-        raise RuntimeError("Database migrations failed")
-    logger.info("startup_migrations_applied")
-
-
-
-def ensure_token_version_column() -> bool:
-    with engine.begin() as connection:
-        exists = connection.execute(
-            text(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name='users'
-                  AND column_name='token_version'
-                """
-            )
-        ).first()
-        if exists:
-            return False
-        connection.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0 NOT NULL"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS idx_users_token_version ON users(token_version)"))
-    logger.info("schema_repair_token_version_applied")
-    return True
 
 
 def _is_scan_path(path: str) -> bool:
@@ -156,17 +122,9 @@ app.add_middleware(
 def startup():
     logger.info("startup_begin")
 
-    from app.services.cyber_card import ensure_cyber_card_indexes
-    from app.services.device_service import ensure_user_devices_table
     from app.services.reality_detection.engine import validate_runtime_dependencies
-    from app.services.scan_jobs import ensure_scan_jobs_table
 
-    run_startup_migrations()
-    ensure_token_version_column()
     validate_runtime_dependencies()
-    ensure_cyber_card_indexes()
-    ensure_scan_jobs_table()
-    ensure_user_devices_table()
 
     try:
         from app.services.news_ingestor import ingest_rss
@@ -187,7 +145,6 @@ from app.routes.history import router as history_router
 from app.routes.analyze_ocr import router as analyze_ocr_router
 from app.routes.security import router as security_router
 from app.routes.trusted_contacts import router as trusted_contacts_router, legacy_router as trusted_contacts_legacy_router
-from app.routes.trusted import router as trusted_router
 from app.routes.alerts import router as alerts_router
 from app.routes.ai import router as ai_router
 from app.routes.risk import router as risk_router
@@ -225,7 +182,6 @@ app.include_router(analyze_ocr_router)
 app.include_router(security_router)
 app.include_router(trusted_contacts_router)
 app.include_router(trusted_contacts_legacy_router)
-app.include_router(trusted_router)
 app.include_router(alerts_router)
 app.include_router(ai_router)
 app.include_router(risk_router)

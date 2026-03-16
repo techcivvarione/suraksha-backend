@@ -237,7 +237,7 @@ def submit_scam_report(
 ):
     report = _build_scam_report(
         user_id=current_user.id,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         title=payload.title,
         description=payload.description,
         source=payload.source,
@@ -322,7 +322,7 @@ def confirm_scam(
 
     report = _build_scam_report(
         user_id=current_user.id,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         title=payload.title,
         description=payload.description,
         source=payload.source,
@@ -379,7 +379,7 @@ def cyber_sos_confirm(
 
     report = _build_scam_report(
         user_id=current_user.id,
-        scam_type=payload.scam_type,
+        category=payload.scam_type,
         title="Cyber SOS - Confirmed Scam",
         description=payload.description,
         source=payload.source,

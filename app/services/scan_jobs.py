@@ -32,6 +32,14 @@ _image_detector = ImageAIDetector()
 _video_detector = VideoDeepfakeDetector()
 _audio_detector = VoiceDeepfakeDetector()
 
+
+def _scan_failure_payload() -> dict:
+    return {
+        "status": "failed",
+        "error_code": "SCAN_FAILED",
+        "message": "Scan failed",
+    }
+
 _SCAN_TYPE_TO_ANALYSIS = {
     "image": ScanType.REALITY_IMAGE.value,
     "video": ScanType.REALITY_VIDEO.value,
@@ -134,13 +142,9 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
         )
     except Exception as exc:
         logger.exception("scan_job_failed", extra={"job_id": str(job.id), "scan_type": job.scan_type})
-        error_payload = {
-            "error": "AI_DETECTION_FAILED",
-            "message": str(exc) or "Unable to analyze media",
-        }
         with db.begin():
             job.status = "failed"
-            job.result_json = json.dumps(error_payload)
+            job.result_json = json.dumps(_scan_failure_payload())
             db.add(job)
     finally:
         try:

@@ -10,6 +10,17 @@ from app.services.scan_jobs import get_scan_job_for_user
 router = APIRouter(prefix="/scan", tags=["Scan"])
 
 
+def _sanitized_failed_result() -> dict:
+    return {
+        "status": "failed",
+        "error_code": "SCAN_FAILED",
+        "message": "Scan failed",
+        "risk_score": 0,
+        "score": 0,
+        "risk_level": "UNKNOWN",
+    }
+
+
 @router.get("/result/{job_id}")
 def get_scan_result(
     job_id: str,
@@ -29,12 +40,14 @@ def get_scan_result(
         try:
             result = json.loads(job.result_json)
         except json.JSONDecodeError:
-            result = {"raw": job.result_json}
+            result = _sanitized_failed_result() if (job.status or "").lower() == "failed" else {}
 
     safe_status = job.status or "pending"
     if result is None:
         result = {}
     if isinstance(result, dict):
+        if safe_status == "failed":
+            result = _sanitized_failed_result()
         safe_score = int(result.get("risk_score", result.get("score", 0)) or 0)
         result.setdefault("risk_score", safe_score)
         result.setdefault("score", safe_score)
