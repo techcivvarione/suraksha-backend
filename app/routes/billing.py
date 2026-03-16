@@ -20,8 +20,8 @@ def upgrade_plan(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail={
-            "success": False,
-            "error": "DIRECT_UPGRADE_DISABLED",
+            "status": "error",
+            "error_code": "DIRECT_UPGRADE_DISABLED",
             "message": "Direct plan upgrades are disabled. Subscription changes are applied only from verified RevenueCat webhooks.",
         },
     )
