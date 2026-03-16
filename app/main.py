@@ -60,14 +60,32 @@ def _is_scan_path(path: str) -> bool:
     return path.startswith("/scan")
 
 
+def _http_error_payload(exc: HTTPException) -> dict:
+    if isinstance(exc.detail, dict):
+        return exc.detail
+
+    message = str(exc.detail)
+    if exc.status_code == 401:
+        return {"error": "INVALID_TOKEN", "message": message}
+    if exc.status_code == 403:
+        return {"error": "FORBIDDEN", "message": message}
+    if exc.status_code == 409:
+        return {"error": "CONFLICT", "message": message}
+    if exc.status_code >= 500:
+        return {"error": "INTERNAL_ERROR", "message": "Something went wrong"}
+    return {"error": "REQUEST_ERROR", "message": message}
+
+
 def _scan_error_payload(exc: HTTPException) -> dict:
     if isinstance(exc.detail, dict):
         return exc.detail
     message = str(exc.detail)
+    if exc.status_code == 401:
+        return {"success": False, "error": "INVALID_TOKEN", "message": message}
     if exc.status_code == 429:
         return {"success": False, "error": "SCAN_LIMIT_REACHED", "message": message}
     if exc.status_code >= 500:
-        return {"success": False, "error": "SCAN_PROCESSING_ERROR", "message": message}
+        return {"success": False, "error": "SCAN_PROCESSING_ERROR", "message": "Something went wrong"}
     return {"success": False, "error": "SCAN_BAD_REQUEST", "message": message}
 
 
@@ -87,25 +105,37 @@ def test_push(token: str = Query(..., min_length=20)):
     try:
         message_id = send_push_notification(token=token, title="GO Suraksha Test", body="Push notifications working")
         return {"status": "push_sent", "message_id": message_id}
-    except Exception as exc:
+    except Exception:
         logger.exception("test_push_failed")
-        return {"status": "error", "error": str(exc)}
+        return {"status": "error", "error": "INTERNAL_ERROR", "message": "Something went wrong"}
 
 
 @app.exception_handler(HTTPException)
 async def scan_http_exception_handler(request: Request, exc: HTTPException):
-    if isinstance(exc.detail, dict):
-        return JSONResponse(status_code=exc.status_code, content=exc.detail)
-    if _is_scan_path(request.url.path):
-        return JSONResponse(status_code=exc.status_code, content=_scan_error_payload(exc))
-    return await http_exception_handler(request, exc)
+    payload = _scan_error_payload(exc) if _is_scan_path(request.url.path) else _http_error_payload(exc)
+    if exc.status_code >= 500:
+        logger.error("api_http_error", extra={"path": request.url.path, "status_code": exc.status_code, "error": payload.get("error")})
+    elif exc.status_code == 401:
+        logger.warning("authentication_failure", extra={"path": request.url.path, "error": payload.get("error")})
+    return JSONResponse(status_code=exc.status_code, content=payload)
 
 
 @app.exception_handler(RequestValidationError)
 async def scan_validation_exception_handler(request: Request, exc: RequestValidationError):
     if _is_scan_path(request.url.path):
         return JSONResponse(status_code=400, content={"success": False, "error": "SCAN_BAD_REQUEST", "message": "Invalid scan request."})
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return JSONResponse(
+        status_code=422,
+        content={"error": "VALIDATION_ERROR", "message": "Invalid request", "details": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("api_unhandled_exception", extra={"path": request.url.path})
+    if _is_scan_path(request.url.path):
+        return JSONResponse(status_code=500, content={"success": False, "error": "SCAN_PROCESSING_ERROR", "message": "Something went wrong"})
+    return JSONResponse(status_code=500, content={"error": "INTERNAL_ERROR", "message": "Something went wrong"})
 
 
 app.add_middleware(SecurityLoggingMiddleware)

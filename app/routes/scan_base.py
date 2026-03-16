@@ -39,7 +39,8 @@ def _log_scan_limit_check(
 
 def require_user(user=Depends(get_current_user)):
     if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        logger.warning("authentication_failure", extra={"error": "INVALID_TOKEN", "path": "scan_guard"})
+        raise HTTPException(status_code=401, detail={"error": "INVALID_TOKEN", "message": "Authentication required"})
     return user
 
 

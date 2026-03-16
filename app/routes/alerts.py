@@ -38,7 +38,8 @@ def list_alerts(
         {"uid": str(current_user.id), "limit": limit, "offset": offset},
     ).mappings().all()
     alerts = [_build_alert_response(row) for row in rows]
-    return {"alerts": alerts, "total": int(total or 0), "page": (offset // limit) + 1}
+    payload = {"alerts": alerts, "total": int(total or 0), "page": (offset // limit) + 1}
+    return {**payload, "data": payload}
 
 
 @router.get("/summary")
@@ -55,13 +56,14 @@ def alert_summary(current_user: User = Depends(get_current_user), db: Session = 
         {"uid": str(current_user.id)},
     ).mappings().all()
     alerts = [_build_alert_response(row) for row in rows]
-    return {
+    payload = {
         "total_alerts": len(alerts),
         "high_risk": sum(1 for alert in alerts if alert["severity"] == "high"),
         "medium_risk": sum(1 for alert in alerts if alert["severity"] == "medium"),
         "low_risk": sum(1 for alert in alerts if alert["severity"] == "low"),
         "latest_alert": alerts[0] if alerts else None,
     }
+    return {**payload, "data": payload}
 
 
 @router.post("/media-risk", status_code=200, response_model=MediaRiskAlertResponse)

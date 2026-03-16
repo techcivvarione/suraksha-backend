@@ -8,8 +8,10 @@ class ScanResponse(BaseModel):
     success: bool = True
     scan_id: uuid.UUID
     analysis_type: str
-    risk_score: int
-    risk_level: str
+    risk_score: int = 0
+    score: int = 0
+    risk_level: str = "UNKNOWN"
+    status: str = "completed"
     confidence: Optional[float] = None
     reasons: List[str]
     recommendation: str

@@ -2,7 +2,7 @@ import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -22,10 +22,12 @@ legacy_router = APIRouter(
 
 
 class TrustedContactCreate(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
     email: EmailStr | None = None
-    phone: str | None = None
-    relationship: str | None = None
+    phone: str | None = Field(default=None, min_length=5, max_length=32)
+    relationship: str | None = Field(default=None, max_length=100)
 
 
 @router.post("/")
@@ -37,7 +39,7 @@ def add_trusted_contact(
     if not payload.email and not payload.phone:
         raise HTTPException(
             status_code=400,
-            detail="At least email or phone is required",
+            detail={"error": "VALIDATION_ERROR", "message": "At least email or phone is required"},
         )
 
     current_count = db.execute(
@@ -103,16 +105,16 @@ def add_trusted_contact(
         {
             "id": str(uuid.uuid4()),
             "uid": str(current_user.id),
-            "name": payload.name,
+            "name": payload.name.strip(),
             "email": payload.email,
-            "phone": payload.phone,
-            "relationship": payload.relationship,
+            "phone": payload.phone.strip() if payload.phone else None,
+            "relationship": payload.relationship.strip() if payload.relationship else None,
             "is_primary": current_count == 0,
         },
     )
 
     db.commit()
-    return {"status": "trusted_contact_added"}
+    return {"status": "trusted_contact_added", "data": {"status": "trusted_contact_added"}}
 
 
 @router.get("/")
@@ -141,7 +143,8 @@ def list_trusted_contacts(
         {"uid": str(current_user.id)},
     ).mappings().all()
 
-    return {"count": len(rows), "data": rows}
+    payload = {"count": len(rows), "data": rows}
+    return payload
 
 
 @legacy_router.get("/")
@@ -175,7 +178,6 @@ def deactivate_trusted_contact(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # prevent deleting sole primary without replacement
     contact = db.execute(
         text(
             """
@@ -229,7 +231,7 @@ def deactivate_trusted_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
 
     db.commit()
-    return {"status": "trusted_contact_deactivated"}
+    return {"status": "trusted_contact_deactivated", "data": {"status": "trusted_contact_deactivated"}}
 
 
 @router.patch("/{contact_id}/set-primary")
@@ -283,4 +285,4 @@ def set_primary_contact(
     except Exception:
         raise HTTPException(status_code=500, detail="Unable to update primary contact")
 
-    return {"status": "PRIMARY_UPDATED"}
+    return {"status": "PRIMARY_UPDATED", "data": {"status": "PRIMARY_UPDATED"}}

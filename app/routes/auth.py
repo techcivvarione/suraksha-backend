@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from app.core.features import TIER_FREE
+from app.core.features import TIER_FREE, normalize_plan
 from app.db import get_db
 from app.models.email_otp import EmailOtp
 from app.models.user import User
@@ -464,15 +464,18 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
 def me(current_user: User = Depends(get_current_user)):
     phone_number = getattr(current_user, "phone_number", None)
     subscription_expires_at = getattr(current_user, "subscription_expires_at", None)
+    plan = normalize_plan(getattr(current_user, "plan", None))
+    subscription_status = getattr(current_user, "subscription_status", None) or ("FREE" if plan == TIER_FREE else "ACTIVE")
     return {
         "id": str(current_user.id),
         "name": getattr(current_user, "name", None),
         "email": getattr(current_user, "email", None),
         "phone_number": phone_number,
         "phone": phone_number,
-        "plan": getattr(current_user, "plan", None),
+        "plan": plan,
         "profile_image_url": getattr(current_user, "profile_image_url", None),
         "token_version": _effective_token_version(current_user),
-        "subscription_status": getattr(current_user, "subscription_status", None),
-        "subscription_expires_at": subscription_expires_at.isoformat() if hasattr(subscription_expires_at, "isoformat") and subscription_expires_at is not None else subscription_expires_at,
+        "subscription_status": subscription_status,
+        "subscription_expires_at": subscription_expires_at.isoformat() if hasattr(subscription_expires_at, "isoformat") and subscription_expires_at is not None else None,
     }
+

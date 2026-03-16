@@ -70,7 +70,8 @@ async def scan_reality_image(
                 "object_key": object_key,
             },
         )
-        return {"job_id": str(job.id), "status": "processing"}
+        payload = {"job_id": str(job.id), "status": "processing", "risk_level": "UNKNOWN", "score": 0}
+        return {**payload, "data": payload}
     except HTTPException:
         raise
     except Exception:

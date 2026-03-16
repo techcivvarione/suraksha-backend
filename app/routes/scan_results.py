@@ -31,7 +31,18 @@ def get_scan_result(
         except json.JSONDecodeError:
             result = {"raw": job.result_json}
 
-    return {
-        "status": job.status,
+    safe_status = job.status or "pending"
+    if result is None:
+        result = {}
+    if isinstance(result, dict):
+        safe_score = int(result.get("risk_score", result.get("score", 0)) or 0)
+        result.setdefault("risk_score", safe_score)
+        result.setdefault("score", safe_score)
+        result.setdefault("risk_level", result.get("risk_level") or "UNKNOWN")
+        result.setdefault("status", result.get("status") or safe_status)
+
+    payload = {
+        "status": safe_status,
         "result": result,
     }
+    return {**payload, "data": payload}
