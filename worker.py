@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import time
 
+from sqlalchemy import text
+
 from app.core.logging_setup import configure_logging
 from app.core.monitoring import init_sentry
-from app.jobs.scan_event_cleanup import cleanup_scan_events
+from app.db import SessionLocal
 from app.services.redis_store import distributed_lock
 from app.services.threat_intel_service import ingest_threat_events
 
@@ -13,6 +15,23 @@ from app.services.threat_intel_service import ingest_threat_events
 configure_logging()
 init_sentry()
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_scan_events() -> int:
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text(
+                """
+                DELETE FROM scan_events
+                WHERE created_at < now() - interval '10 minutes'
+                """
+            )
+        )
+        db.commit()
+        return int(result.rowcount or 0)
+    finally:
+        db.close()
 
 
 def run_forever() -> None:
@@ -23,7 +42,7 @@ def run_forever() -> None:
         now = time.monotonic()
 
         if now - last_cleanup >= 120:
-            deleted = cleanup_scan_events()
+            deleted = _cleanup_scan_events()
             if deleted:
                 logger.info("scan_event_cleanup_completed", extra={"deleted": deleted})
             last_cleanup = now

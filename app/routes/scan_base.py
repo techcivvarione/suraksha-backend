@@ -1,13 +1,52 @@
 import uuid
 import logging
+from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
 
 from app.core.features import TIER_FREE, TIER_PRO, TIER_ULTRA, normalize_plan
 from app.routes.auth import get_current_user
-from app.services.rate_limit import RateLimitError, check_rate_limit, check_scan_limit, enforce_rate_limit
+from redis.exceptions import RedisError
+
+from app.services.redis_store import allow_sliding_window, consume_scan_limit, consume_sliding_window
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    count: int
+    limit: int
+
+
+def enforce_rate_limit(namespace: str, limit: int, window_seconds: int, *key_parts: str):
+    try:
+        allowed = allow_sliding_window(namespace, limit, window_seconds, *key_parts)
+    except RedisError:
+        raise RateLimitError("Rate limiter unavailable")
+    if not allowed:
+        raise RateLimitError("Rate limited")
+
+
+def check_rate_limit(namespace: str, limit: int, window_seconds: int, *key_parts: str) -> RateLimitResult:
+    try:
+        allowed, count = consume_sliding_window(namespace, limit, window_seconds, *key_parts)
+    except RedisError:
+        raise RateLimitError("Rate limiter unavailable")
+    return RateLimitResult(allowed=allowed, count=count, limit=limit)
+
+
+def check_scan_limit(user_id: str, scan_type: str, limit: int, period: str) -> RateLimitResult:
+    try:
+        allowed, count = consume_scan_limit(user_id, scan_type, limit, period)
+    except RedisError:
+        raise RateLimitError("Rate limiter unavailable")
+    return RateLimitResult(allowed=allowed, count=count, limit=limit)
 
 
 def _log_scan_limit_check(

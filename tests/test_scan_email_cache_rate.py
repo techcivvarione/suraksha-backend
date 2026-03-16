@@ -31,7 +31,7 @@ def test_repeated_scan_uses_cache(client, go_pro_token, monkeypatch):
 def test_email_rate_limit(client, auth_token, monkeypatch):
     from app.routes import scan_base
     from app.services.email import email_analyzer
-    from app.services.rate_limit import RateLimitResult
+    from app.routes.scan_base import RateLimitResult
 
     monkeypatch.setattr(email_analyzer.HIBPProvider, "lookup", lambda self, email: {"breach_count": 0})
 
@@ -71,3 +71,4 @@ def test_email_invalid_format(client, auth_token):
         json={"email": "invalid@@example"},
     )
     assert resp.status_code == 400
+

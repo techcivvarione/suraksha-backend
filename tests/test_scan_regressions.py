@@ -4,7 +4,7 @@ import logging
 import pytest
 from redis.exceptions import RedisError
 
-from app.services.rate_limit import RateLimitResult
+from app.routes.scan_base import RateLimitResult
 
 
 def _headers(token: str) -> dict:
@@ -186,3 +186,4 @@ def test_scan_limit_check_logs_include_plan_endpoint_and_decision(client, caplog
     ]
     assert matching
     assert getattr(matching[0], "plan", None) == "GO_PRO"
+

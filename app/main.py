@@ -215,7 +215,7 @@ from app.routes.risk_timeline import router as risk_timeline_router
 from app.routes.risk_insights import router as risk_insights_router
 from app.routes.ai_explanations import router as ai_explanations_router
 from app.routes.family import router as family_router
-from app.routes import trusted_alerts
+from app.routes.trusted_alerts import router as trusted_alerts_router
 from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
 from app.routes.scam_network import router as scam_network_router
@@ -252,7 +252,7 @@ app.include_router(risk_timeline_router)
 app.include_router(risk_insights_router)
 app.include_router(ai_explanations_router)
 app.include_router(family_router)
-app.include_router(trusted_alerts.router)
+app.include_router(trusted_alerts_router)
 app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
 app.include_router(scam_network_router)

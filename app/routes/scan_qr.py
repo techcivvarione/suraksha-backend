@@ -6,12 +6,41 @@ from app.services.qr.qr_analyzer import analyze_qr
 from app.services.response_builder import build_scan_response
 from app.services.scan_logger import log_scan_event
 from app.enums.scan_type import ScanType
-from app.services.reputation import update_scan_reputation
 import hashlib
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db import get_db
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
+
+
+def _update_scan_reputation(db: Session, hash_value: str, hash_type: str):
+    db.execute(
+        text(
+            """
+            INSERT INTO scan_reputation (hash_value, hash_type, first_seen, last_seen, scan_count, report_count, is_flagged, created_at, updated_at)
+            VALUES (:hv, :ht, now(), now(), 1, 0, false, now(), now())
+            ON CONFLICT (hash_value, hash_type)
+            DO UPDATE SET
+                scan_count = scan_reputation.scan_count + 1,
+                last_seen = now(),
+                updated_at = now()
+            """
+        ),
+        {"hv": hash_value, "ht": hash_type},
+    )
+    row = db.execute(
+        text(
+            """
+            SELECT scan_count, report_count, is_flagged
+            FROM scan_reputation
+            WHERE hash_value = :hv AND hash_type = :ht
+            """
+        ),
+        {"hv": hash_value, "ht": hash_type},
+    ).mappings().first()
+    db.commit()
+    return int(row["scan_count"]), int(row["report_count"]), bool(row["is_flagged"])
 
 
 @router.post("/qr")
@@ -33,7 +62,7 @@ def scan_qr(
 
     result = analyze_qr(raw_payload)
     hash_value = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
-    rep_scan, rep_report, rep_flag = update_scan_reputation(db, hash_value, "QR")
+    rep_scan, rep_report, rep_flag = _update_scan_reputation(db, hash_value, "QR")
 
     response = build_scan_response(
         analysis_type=ScanType.QR.value,
