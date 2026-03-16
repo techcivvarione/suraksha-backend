@@ -37,3 +37,16 @@ class AuthMeResponse(BaseModel):
     token_version: int = 0
     subscription_status: Optional[str] = None
     subscription_expires_at: Optional[str] = None
+
+
+class SendPhoneOtpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+
+
+class VerifyPhoneOtpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+    otp: str

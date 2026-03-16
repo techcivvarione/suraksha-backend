@@ -23,11 +23,20 @@ from sqlalchemy.orm import Session
 from app.core.features import TIER_FREE, normalize_plan
 from app.db import get_db
 from app.models.email_otp import EmailOtp
+from app.models.phone_otp import PhoneOtp
 from app.models.user import User
-from app.schemas.auth import AuthMeResponse, LoginResponse, SignupRequest
+from app.schemas.auth import (
+    AuthMeResponse,
+    LoginResponse,
+    SendPhoneOtpRequest,
+    SignupRequest,
+    VerifyPhoneOtpRequest,
+)
 from app.services.audit_logger import create_audit_log
 from app.services.email_otp_rate_limiter import allow_email_send, allow_ip_send
 from app.services.email_service import send_otp_email
+from app.services.phone_otp_service import create_phone_otp, normalize_phone, verify_phone_otp
+from app.services.sms_service import SMSDeliveryError, send_sms
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -228,6 +237,42 @@ def _find_user_by_email_exact(db: Session, email: str) -> User | None:
     return db.query(User).filter(func.lower(User.email) == normalized_email).first()
 
 
+def _find_user_by_phone_exact(db: Session, phone: str) -> User | None:
+    return db.query(User).filter(User.phone_number == phone).first()
+
+
+def _resolve_phone_user_identity(db: Session, *, phone: str) -> User:
+    user = _find_user_by_phone_exact(db, phone)
+    if user:
+        user.phone_verified = True
+        if not getattr(user, "auth_provider", None):
+            user.auth_provider = "phone"
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    temp_pwd = secrets.token_hex(16)
+    now = datetime.now(tz=timezone.utc)
+    user = User(
+        name=f"User {phone[-4:]}",
+        email=None,
+        phone_number=phone,
+        phone_verified=True,
+        plan=TIER_FREE,
+        subscription_status="ACTIVE",
+        subscription_expires_at=None,
+        auth_provider="phone",
+        password_hash=hash_password(temp_pwd),
+        password_changed_at=now,
+        token_version=0,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, name: str | None) -> User:
     user = _find_user_by_google_sub(db, google_sub)
     if user:
@@ -357,6 +402,30 @@ def verify_email_otp(payload: VerifyEmailOtpRequest, request: Request, db: Sessi
             response_payload = {"success": True}
     _ensure_min_delay(start_time)
     return response_payload
+
+
+@router.post("/send-phone-otp")
+def send_phone_otp(payload: SendPhoneOtpRequest, db: Session = Depends(get_db)):
+    normalized_phone = normalize_phone(payload.phone)
+    otp = create_phone_otp(db, normalized_phone)
+    try:
+        send_sms(normalized_phone, otp)
+    except SMSDeliveryError:
+        logger.exception("phone_otp_sms_failed", extra={"phone": normalized_phone[-4:]})
+        raise HTTPException(
+            status_code=502,
+            detail={"error_code": "SMS_SEND_FAILED", "message": "Unable to send OTP"},
+        )
+    return {"message": "OTP sent"}
+
+
+@router.post("/verify-phone-otp")
+def verify_phone_otp_login(payload: VerifyPhoneOtpRequest, request: Request, db: Session = Depends(get_db)):
+    normalized_phone = verify_phone_otp(db, payload.phone, payload.otp)
+    user = _resolve_phone_user_identity(db, phone=normalized_phone)
+    token = create_access_token(user)
+    create_audit_log(db=db, user_id=user.id, event_type="PHONE_OTP_LOGIN_SUCCESS", event_description="User logged in with phone OTP", request=request)
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/signup")

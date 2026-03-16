@@ -15,7 +15,8 @@ class User(Base):
 
     name = Column(String, nullable=False)
     email = Column(String, unique=True)
-    phone_number = Column(String(20), nullable=True, index=True)
+    phone_number = Column(String(20), nullable=True, unique=True, index=True)
+    phone_verified = Column(Boolean, nullable=False, default=False, server_default="false")
 
     password_hash = Column(String, nullable=False)
     auth_provider = Column(String, nullable=False, default="password")
