@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import secrets
 
@@ -9,9 +10,10 @@ import requests
 
 MSG91_URL = "https://control.msg91.com/api/v5/flow"
 MSG91_API_KEY = os.getenv("MSG91_API_KEY")
-MSG91_TEMPLATE_ID = os.getenv("DLT_TEMPLATE_ID") or os.getenv("MSG91_TEMPLATE_ID")
+DLT_TEMPLATE_ID = os.getenv("DLT_TEMPLATE_ID") or os.getenv("MSG91_TEMPLATE_ID")
 OTP_HASH_SECRET = os.getenv("OTP_SECRET_SALT") or os.getenv("SECRET_KEY")
 OTP_LENGTH = 6
+logger = logging.getLogger(__name__)
 
 
 class SMSDeliveryError(RuntimeError):
@@ -29,8 +31,19 @@ def hash_otp(phone: str, otp: str) -> str:
 
 
 def send_sms(phone: str, otp: str) -> None:
-    if not MSG91_API_KEY or not MSG91_TEMPLATE_ID:
+    if not MSG91_API_KEY or not DLT_TEMPLATE_ID:
         raise SMSDeliveryError("SMS provider is not configured")
+
+    payload = {
+        "template_id": DLT_TEMPLATE_ID,
+        "recipients": [
+            {
+                "mobiles": phone,
+                "VAR1": otp,
+            }
+        ],
+    }
+    logger.info("MSG91 payload: %s", payload)
 
     response = requests.post(
         MSG91_URL,
@@ -38,15 +51,7 @@ def send_sms(phone: str, otp: str) -> None:
             "authkey": MSG91_API_KEY,
             "content-type": "application/json",
         },
-        json={
-            "template_id": MSG91_TEMPLATE_ID,
-            "recipients": [
-                {
-                    "mobiles": phone,
-                    "VAR1": otp,
-                }
-            ],
-        },
+        json=payload,
         timeout=15,
     )
     if response.status_code >= 400:
