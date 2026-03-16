@@ -1,7 +1,7 @@
 """phone otp auth
 
 Revision ID: 20260316_01_phone_otp_auth
-Revises: 20260314_04_google_sub
+Revises: 20260314_04
 Create Date: 2026-03-16
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20260316_01_phone_otp_auth"
-down_revision = "20260314_04_google_sub"
+down_revision = "20260314_04"
 branch_labels = None
 depends_on = None
 
@@ -48,3 +48,4 @@ def downgrade() -> None:
     op.drop_table("phone_otps")
     op.execute("DROP INDEX IF EXISTS uq_users_phone_number")
     op.drop_column("users", "phone_verified")
+
