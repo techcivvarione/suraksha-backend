@@ -253,19 +253,23 @@ def _find_user_by_google_sub(db: Session, google_sub: str) -> User | None:
     return db.query(User).filter(User.google_sub == google_sub).first()
 
 
+def _read_user_phone(user: User | object) -> str | None:
+    return getattr(user, "phone", None) or getattr(user, "phone_number", None)
+
+
 def _find_user_by_phone_exact(db: Session, phone: str) -> User | None:
-    return db.query(User).filter(User.phone_number == phone).first()
+    return db.query(User).filter(User.phone == phone).first()
 
 
 def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User | None = None) -> User:
-    user = _find_user_by_phone_exact(db, phone)
-    if user:
-        user.phone_number = phone
-        user.phone_verified = True
-        return _touch_last_login(db, user, "phone")
+    existing_user = _find_user_by_phone_exact(db, phone)
+    if existing_user:
+        if current_user is not None and existing_user.id != current_user.id:
+            raise HTTPException(status_code=409, detail="Phone number already linked to another account")
+        return existing_user
 
     if current_user is not None:
-        current_user.phone_number = phone
+        current_user.phone = phone
         current_user.phone_verified = True
         return _touch_last_login(db, current_user, current_user.auth_provider or "phone")
 
@@ -275,7 +279,7 @@ def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User 
         name=f"User {phone[-4:]}",
         email=None,
         email_verified=False,
-        phone_number=phone,
+        phone=phone,
         phone_verified=True,
         plan=TIER_FREE,
         subscription_status="ACTIVE",
@@ -317,7 +321,7 @@ def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, n
         name=name or "Google User",
         email=email,
         email_verified=True,
-        phone_number=None,
+        phone=None,
         phone_verified=False,
         plan=TIER_FREE,
         subscription_status="ACTIVE",
@@ -471,7 +475,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     validate_password_strength(payload.password)
     normalized_email = _normalize_email(payload.email)
     normalized_phone = normalize_phone(payload.phone or payload.phone_number or "")
-    exists = db.query(User).filter((func.lower(User.email) == normalized_email) | (User.phone_number == normalized_phone)).first()
+    exists = db.query(User).filter((func.lower(User.email) == normalized_email) | (User.phone == normalized_phone)).first()
     if exists:
         raise HTTPException(status_code=400, detail={"error_code": "DUPLICATE_ACCOUNT", "message": "User already exists"})
 
@@ -480,7 +484,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
         name=payload.name,
         email=normalized_email,
         email_verified=False,
-        phone_number=normalized_phone,
+        phone=normalized_phone,
         phone_verified=False,
         plan=TIER_FREE,
         subscription_status="ACTIVE",
@@ -576,7 +580,7 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
 
 @router.get("/me", response_model=AuthMeResponse)
 def me(current_user: User = Depends(get_current_user)):
-    phone_number = getattr(current_user, "phone_number", None)
+    phone = _read_user_phone(current_user)
     subscription_expires_at = getattr(current_user, "subscription_expires_at", None)
     plan = normalize_plan(getattr(current_user, "plan", None))
     subscription_status = getattr(current_user, "subscription_status", None) or ("FREE" if plan == TIER_FREE else "ACTIVE")
@@ -584,8 +588,7 @@ def me(current_user: User = Depends(get_current_user)):
         "id": str(current_user.id),
         "name": getattr(current_user, "name", None),
         "email": getattr(current_user, "email", None),
-        "phone_number": phone_number,
-        "phone": phone_number,
+        "phone": phone,
         "plan": plan,
         "profile_image_url": getattr(current_user, "profile_image_url", None),
         "token_version": _effective_token_version(current_user),

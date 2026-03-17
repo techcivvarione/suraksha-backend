@@ -16,7 +16,7 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True)
     email_verified = Column(Boolean, nullable=False, default=False, server_default="false")
-    phone_number = Column(String(20), nullable=True, unique=True, index=True)
+    phone = Column(String(20), nullable=True, unique=True, index=True)
     phone_verified = Column(Boolean, nullable=False, default=False, server_default="false")
 
     password_hash = Column(String, nullable=False)
@@ -42,3 +42,11 @@ class User(Base):
     accepted_terms_at = Column(DateTime(timezone=True), nullable=True)
     terms_version = Column(String, nullable=True)
     privacy_version = Column(String, nullable=True)
+
+    @property
+    def phone_number(self) -> str | None:
+        return self.phone
+
+    @phone_number.setter
+    def phone_number(self, value: str | None) -> None:
+        self.phone = value

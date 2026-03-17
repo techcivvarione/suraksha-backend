@@ -32,7 +32,6 @@ class AuthMeResponse(BaseModel):
     id: str
     name: Optional[str] = None
     email: Optional[str] = None
-    phone_number: Optional[str] = None
     phone: Optional[str] = None
     plan: Optional[str] = None
     profile_image_url: Optional[str] = None
