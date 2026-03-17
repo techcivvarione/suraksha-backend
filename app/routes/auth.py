@@ -217,6 +217,18 @@ def _token_response(user: User, *, needs_phone_verification: bool, include_terms
     return payload
 
 
+def _auth_user_payload(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "name": getattr(user, "name", None),
+        "email": getattr(user, "email", None),
+        "phone": _read_user_phone(user),
+        "phone_verified": bool(getattr(user, "phone_verified", False)),
+        "profile_image_url": getattr(user, "profile_image_url", None),
+        "plan": normalize_plan(getattr(user, "plan", None)),
+    }
+
+
 def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     return _resolve_current_user(request=request, credentials=credentials, db=db, required=True)
 
@@ -261,17 +273,18 @@ def _find_user_by_phone_exact(db: Session, phone: str) -> User | None:
     return db.query(User).filter(User.phone == phone).first()
 
 
-def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User | None = None) -> User:
+def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User | None = None) -> tuple[User, bool]:
     existing_user = _find_user_by_phone_exact(db, phone)
     if existing_user:
         if current_user is not None and existing_user.id != current_user.id:
             raise HTTPException(status_code=409, detail="Phone number already linked to another account")
-        return existing_user
+        existing_user.phone_verified = True
+        return _touch_last_login(db, existing_user, "phone"), False
 
     if current_user is not None:
         current_user.phone = phone
         current_user.phone_verified = True
-        return _touch_last_login(db, current_user, current_user.auth_provider or "phone")
+        return _touch_last_login(db, current_user, current_user.auth_provider or "phone"), False
 
     temp_pwd = secrets.token_urlsafe(32)
     now = datetime.now(tz=timezone.utc)
@@ -293,7 +306,7 @@ def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User 
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return user, True
 
 
 def _resolve_google_user_identity(db: Session, *, google_sub: str, email: str, name: str | None) -> User:
@@ -458,10 +471,13 @@ def verify_phone_otp_login(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     normalized_phone = verify_phone_otp(db, payload.phone, payload.otp)
-    user = _resolve_phone_user_identity(db, phone=normalized_phone, current_user=current_user)
+    user, is_new_user = _resolve_phone_user_identity(db, phone=normalized_phone, current_user=current_user)
     logger.info("auth.phone_login", extra={"user_id": str(user.id), "phone_suffix": normalized_phone[-4:]})
     create_audit_log(db=db, user_id=user.id, event_type="PHONE_OTP_LOGIN_SUCCESS", event_description="User logged in with phone OTP", request=request)
-    return _token_response(user, needs_phone_verification=False)
+    payload = _token_response(user, needs_phone_verification=False)
+    payload["user"] = _auth_user_payload(user)
+    payload["is_new_user"] = is_new_user
+    return payload
 
 
 @router.post("/signup")
@@ -565,7 +581,10 @@ def _handle_google_login(*, google_token: str, request: Request, db: Session) ->
     needs_phone_verification = not bool(getattr(user, "phone_verified", False))
     logger.info("auth.google_login", extra={"user_id": str(user.id), "needs_phone_verification": needs_phone_verification})
     create_audit_log(db=db, user_id=user.id, event_type="GOOGLE_LOGIN_SUCCESS", event_description="User logged in with Google", request=request)
-    return _token_response(user, needs_phone_verification=needs_phone_verification)
+    payload = _token_response(user, needs_phone_verification=needs_phone_verification)
+    payload["user"] = _auth_user_payload(user)
+    payload["phone_verified"] = bool(getattr(user, "phone_verified", False))
+    return payload
 
 
 @router.post("/google-login")
