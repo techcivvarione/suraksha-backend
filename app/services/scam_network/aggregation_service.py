@@ -1,27 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from datetime import datetime, timedelta, timezone
 
-from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.alert_event import AlertEvent
-from app.models.attack_location import AttackLocation
 from app.models.phishing_link import PhishingLink
 from app.models.scam_number import ScamNumber
 from app.services.notification_service import NotificationService
-from app.services.redis_store import get_json, set_json
-from app.services.scam_network.normalization import geohash_bucket, normalize_domain
+from app.services.scam_network.normalization import normalize_domain
 
 notifier = NotificationService()
-logger = logging.getLogger(__name__)
-
-HOTSPOT_CACHE_NAMESPACE = "scam:hotspots"
-HOTSPOT_CACHE_TTL_SECONDS = 60
-MAX_HOTSPOTS = 100
 
 
 # Aggregation flow pseudocode:
@@ -36,84 +27,12 @@ def update_aggregations(db: Session, report) -> dict:
         result['phone_alert_created'] = _update_scam_number(db, report)
     if report.normalized_url:
         result['url_alert_created'] = _update_phishing_link(db, report)
-    if report.latitude is not None and report.longitude is not None:
-        _update_attack_locations(db, report)
     db.commit()
     return result
 
 
 def get_number_intelligence(db: Session, normalized_phone_number: str) -> ScamNumber | None:
     return db.query(ScamNumber).filter(ScamNumber.normalized_phone_number == normalized_phone_number).first()
-
-
-def fetch_hotspots(db: Session, *, category: str | None, limit: int) -> list[dict]:
-    safe_limit = max(1, min(limit, MAX_HOTSPOTS))
-    cache_key = (category or "all", safe_limit)
-    cached = _read_hotspot_cache(*cache_key)
-    if cached is not None:
-        return cached
-
-    now = datetime.now(timezone.utc)
-    current_start = now - timedelta(hours=24)
-    previous_start = now - timedelta(hours=48)
-    rows = db.execute(
-        text(
-            """
-            WITH counts AS (
-                SELECT
-                    COALESCE(NULLIF(city, ''), NULLIF(state, ''), NULLIF(country, ''), 'Unknown') AS region,
-                    NULLIF(state, '') AS state,
-                    NULLIF(country, '') AS country,
-                    COUNT(*) FILTER (WHERE created_at >= :current_start) AS current_count,
-                    COUNT(*) FILTER (WHERE created_at >= :previous_start AND created_at < :current_start) AS previous_count
-                FROM scam_reports
-                WHERE created_at >= :previous_start
-                  AND (:category IS NULL OR category = :category)
-                  AND (city IS NOT NULL OR state IS NOT NULL OR country IS NOT NULL)
-                GROUP BY COALESCE(NULLIF(city, ''), NULLIF(state, ''), NULLIF(country, ''), 'Unknown'), NULLIF(state, ''), NULLIF(country, '')
-            ),
-            ranked AS (
-                SELECT
-                    region,
-                    state,
-                    country,
-                    current_count,
-                    previous_count,
-                    CASE
-                        WHEN previous_count = 0 AND current_count > 0 THEN 'new'
-                        WHEN current_count > previous_count THEN 'increasing'
-                        WHEN current_count < previous_count THEN 'decreasing'
-                        ELSE 'stable'
-                    END AS trend,
-                    ROW_NUMBER() OVER (ORDER BY current_count DESC, region, state, country) AS row_num
-                FROM counts
-                WHERE current_count > 0
-            )
-            SELECT region, state, country, current_count AS count, trend
-            FROM ranked
-            WHERE row_num <= :limit
-            ORDER BY count DESC, region
-            """
-        ),
-        {
-            "current_start": current_start,
-            "previous_start": previous_start,
-            "category": category,
-            "limit": safe_limit,
-        },
-    ).mappings().all()
-    hotspots = [
-        {
-            "region": str(row["region"]),
-            "state": row["state"],
-            "country": row["country"],
-            "count": int(row["count"] or 0),
-            "trend": str(row["trend"]),
-        }
-        for row in rows
-    ]
-    _write_hotspot_cache(hotspots, *cache_key)
-    return hotspots
 
 
 def _update_scam_number(db: Session, report) -> bool:
@@ -175,30 +94,6 @@ def _update_phishing_link(db: Session, report) -> bool:
     else:
         aggregate.status = 'REPORTED_PATTERN'
     return False
-
-
-def _update_attack_locations(db: Session, report) -> None:
-    bucket = geohash_bucket(report.latitude, report.longitude)
-    if not bucket:
-        return
-    for window in ('24h', '7d', '30d'):
-        count = _location_count(db, report.state, report.country, window)
-        location = db.query(AttackLocation).filter(AttackLocation.geohash == bucket, AttackLocation.time_window == window).first()
-        if not location:
-            location = AttackLocation(
-                geohash=bucket,
-                latitude_center=round(float(report.latitude), 2),
-                longitude_center=round(float(report.longitude), 2),
-                city=report.city,
-                state=report.state,
-                country=report.country,
-                time_window=window,
-            )
-            db.add(location)
-        location.report_count = count
-        location.last_aggregated_at = datetime.now(timezone.utc)
-
-
 def fetch_alerts(db: Session, *, state: str | None, country: str | None, limit: int, offset: int) -> tuple[list[dict], int]:
     rows = db.execute(
         text(
@@ -283,34 +178,6 @@ def _url_counts(db: Session, normalized_url: str) -> dict:
         {'url': normalized_url, 'd1': now - timedelta(days=1), 'd7': now - timedelta(days=7), 'd30': now - timedelta(days=30)},
     ).mappings().first()
     return dict(row or {})
-
-
-def _location_count(db: Session, state: str | None, country: str | None, window: str) -> int:
-    since = _since_for_window(window)
-    count = db.execute(
-        text(
-            '''
-            SELECT COUNT(*)
-            FROM scam_reports
-            WHERE created_at >= :since
-              AND state IS NOT DISTINCT FROM :state
-              AND country IS NOT DISTINCT FROM :country
-            '''
-        ),
-        {'since': since, 'state': state, 'country': country},
-    ).scalar()
-    return int(count or 0)
-
-
-def _since_for_window(window: str):
-    now = datetime.now(timezone.utc)
-    if window == '24h':
-        return now - timedelta(days=1)
-    if window == '7d':
-        return now - timedelta(days=7)
-    return now - timedelta(days=30)
-
-
 def _risk_level_from_count(report_count_24h: int, report_count_30d: int) -> str:
     if report_count_24h >= 5 or report_count_30d >= 20:
         return 'high'
@@ -348,22 +215,3 @@ def _broadcast_regional_alert(db: Session, *, title: str, body: str, state: str 
     ).mappings().all()
     for row in rows:
         notifier.send_push_notification(db=db, contact_user_id=row['user_id'], title=title, body=body, user_id=str(row['user_id']))
-
-
-def _read_hotspot_cache(category: str, limit: int) -> list[dict] | None:
-    try:
-        cached = get_json(HOTSPOT_CACHE_NAMESPACE, category, limit)
-    except (RedisError, RuntimeError):
-        logger.warning('scam_hotspot_cache_read_failed', exc_info=True)
-        return None
-    if not cached:
-        return None
-    hotspots = cached.get('hotspots')
-    return hotspots if isinstance(hotspots, list) else None
-
-
-def _write_hotspot_cache(hotspots: list[dict], category: str, limit: int) -> None:
-    try:
-        set_json(HOTSPOT_CACHE_NAMESPACE, {'hotspots': hotspots}, HOTSPOT_CACHE_TTL_SECONDS, category, limit)
-    except (RedisError, RuntimeError):
-        logger.warning('scam_hotspot_cache_write_failed', exc_info=True)
