@@ -17,7 +17,7 @@ from google.oauth2 import id_token
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy import func, text
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.features import TIER_FREE, normalize_plan
@@ -26,6 +26,7 @@ from app.models.email_otp import EmailOtp
 from app.models.user import User
 from app.schemas.auth import (
     AuthMeResponse,
+    DeleteAccountRequest,
     GoogleLoginRequest,
     LoginResponse,
     SendPhoneOtpRequest,
@@ -248,6 +249,78 @@ def _load_user_with_token_version(db: Session, user_id: str) -> User | None:
     user, effective_token_version = row
     user.token_version = int(effective_token_version or 0)
     return user
+
+
+def _existing_table_names(db: Session) -> set[str]:
+    bind = db.get_bind()
+    return set(inspect(bind).get_table_names())
+
+
+def _delete_account_related_data(db: Session, *, user_id: str) -> None:
+    existing_tables = _existing_table_names(db)
+    delete_statements: list[tuple[str, dict[str, str]]] = []
+
+    if "trusted_alerts" in existing_tables and "trusted_contacts" in existing_tables:
+        delete_statements.append(
+            (
+                """
+                DELETE FROM trusted_alerts
+                WHERE contact_id IN (
+                    SELECT id
+                    FROM trusted_contacts
+                    WHERE owner_user_id = CAST(:user_id AS uuid)
+                       OR contact_user_id = CAST(:user_id AS uuid)
+                )
+                """,
+                {"user_id": user_id},
+            )
+        )
+
+    if "family_alerts" in existing_tables:
+        delete_statements.append(
+            (
+                """
+                DELETE FROM family_alerts
+                WHERE family_head_user_id = CAST(:user_id AS uuid)
+                   OR member_user_id = CAST(:user_id AS uuid)
+                """,
+                {"user_id": user_id},
+            )
+        )
+
+    if "trusted_contacts" in existing_tables:
+        delete_statements.append(
+            (
+                """
+                DELETE FROM trusted_contacts
+                WHERE owner_user_id = CAST(:user_id AS uuid)
+                   OR contact_user_id = CAST(:user_id AS uuid)
+                """,
+                {"user_id": user_id},
+            )
+        )
+
+    for table_name in (
+        "alert_events",
+        "audit_logs",
+        "qr_reports",
+        "qr_scan_logs",
+        "scan_history",
+        "scan_jobs",
+        "scam_reports",
+        "subscription_events",
+        "user_devices",
+    ):
+        if table_name in existing_tables:
+            delete_statements.append(
+                (
+                    f"DELETE FROM {table_name} WHERE user_id = CAST(:user_id AS uuid)",
+                    {"user_id": user_id},
+                )
+            )
+
+    for statement, params in delete_statements:
+        db.execute(text(statement), params)
 
 
 def _find_user_by_email_exact(db: Session, email: str | None) -> User | None:
@@ -588,6 +661,35 @@ def _handle_google_login(*, google_token: str, request: Request, db: Session) ->
 @router.post("/google-login")
 def google_login(payload: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
     return _handle_google_login(google_token=payload.google_id_token, request=request, db=db)
+
+
+@router.post("/delete-account")
+def delete_account(
+    payload: DeleteAccountRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if payload.confirm_username != current_user.name:
+        raise HTTPException(status_code=400, detail="Confirmation name does not match")
+
+    user_id = str(current_user.id)
+    try:
+        invalidate_user_sessions(current_user)
+        db.add(current_user)
+        _delete_account_related_data(db, user_id=user_id)
+        db.delete(current_user)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception("auth.delete_account_failed", extra={"user_id": user_id})
+        raise HTTPException(status_code=500, detail="Unable to delete account")
+
+    logger.info("User %s deleted account", user_id, extra={"user_id": user_id, "path": request.url.path})
+    return {"status": "success", "message": "Account deleted permanently"}
 
 
 @router.post("/google")

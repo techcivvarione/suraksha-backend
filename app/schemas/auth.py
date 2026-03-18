@@ -57,3 +57,9 @@ class GoogleLoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     google_id_token: str
+
+
+class DeleteAccountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_username: str
