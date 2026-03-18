@@ -276,8 +276,6 @@ def _find_user_by_phone_exact(db: Session, phone: str) -> User | None:
 def _resolve_phone_user_identity(db: Session, *, phone: str, current_user: User | None = None) -> tuple[User, bool]:
     existing_user = _find_user_by_phone_exact(db, phone)
     if existing_user:
-        if current_user is not None and existing_user.id != current_user.id:
-            raise HTTPException(status_code=409, detail="Phone number already linked to another account")
         existing_user.phone_verified = True
         return _touch_last_login(db, existing_user, "phone"), False
 
