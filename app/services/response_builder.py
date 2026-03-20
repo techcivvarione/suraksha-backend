@@ -2,10 +2,11 @@ import uuid
 from typing import List, Optional
 
 from app.schemas.scan_response import ScanResponse
+from app.services.risk_mapper import derive_risk_level_from_score
 
 
-SAFE_RISK_LEVEL = "UNKNOWN"
 SAFE_STATUS = "completed"
+_INVALID_RISK_LEVELS = {"", "UNKNOWN", "NONE", "NULL"}
 
 
 def build_scan_response(
@@ -20,7 +21,16 @@ def build_scan_response(
 ) -> ScanResponse:
     sid = scan_id or uuid.uuid4()
     safe_score = int(risk_score or 0)
-    safe_risk_level = str(risk_level or SAFE_RISK_LEVEL)
+
+    # Never emit "UNKNOWN". If the caller didn't supply a valid risk level
+    # (e.g. a new analyzer that only computes a score), derive it from the
+    # numeric score so the UI always renders LOW / MEDIUM / HIGH.
+    normalised = (risk_level or "").strip().upper()
+    if normalised not in _INVALID_RISK_LEVELS:
+        safe_risk_level = normalised
+    else:
+        safe_risk_level = derive_risk_level_from_score(safe_score)
+
     safe_reasons = reasons or []
     safe_recommendation = recommendation or "No recommendation available."
     status = extra.pop("status", SAFE_STATUS) or SAFE_STATUS

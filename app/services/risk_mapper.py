@@ -27,3 +27,43 @@ def map_breach_count_to_risk(count: int) -> dict:
     if c < 1000:
         return {"risk_score": 60, "risk_level": "MEDIUM"}
     return {"risk_score": 90, "risk_level": "HIGH"}
+
+
+def derive_risk_level_from_score(score: int) -> str:
+    """
+    Derives a human-readable risk level from a numeric score (0-100).
+    Used as a guaranteed fallback so risk_level is NEVER null or 'UNKNOWN'.
+
+    Thresholds mirror map_breach_count_to_risk and classify_risk in risk_scoring.py:
+      0-30  → LOW
+      31-60 → MEDIUM
+      61+   → HIGH
+    """
+    s = max(0, min(int(score or 0), 100))
+    if s <= 30:
+        return "LOW"
+    if s <= 60:
+        return "MEDIUM"
+    return "HIGH"
+
+
+def compute_breach_confidence(breach_count: int, data_is_fresh: bool = True) -> float:
+    """
+    Returns a confidence score (0.0-1.0) for breach-based scan results.
+
+    HIBP is considered a high-authority source:
+    - breach_count > 0  : data definitively proves a breach → 1.0
+    - breach_count == 0 + fresh live query : no breach found, high confidence → 0.95
+    - breach_count == 0 + cached result   : slightly stale, still reliable → 0.90
+    - breach_count == 0 + HIBP unavailable (caller passes data_is_fresh=False) → 0.50
+
+    A non-None confidence value lets the UI render a real percentage
+    instead of falling back to "0%".
+    """
+    count = max(0, int(breach_count or 0))
+    if count > 0:
+        # Definitive evidence of compromise — confidence is absolute
+        return 1.0
+    if data_is_fresh:
+        return 0.95
+    return 0.50
