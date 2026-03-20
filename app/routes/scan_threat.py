@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.features import normalize_plan
 from app.db import get_db
 from app.routes.scan_base import generate_scan_id, raise_scan_error, require_user
+from app.schemas.scan_response import ScanResponse
 from app.schemas.scan_threat import ThreatScanRequest
 from app.services.alert_rate_limiter import enforce_alert_limits
 from app.services.threat.threat_analyzer import analyze_threat
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/scan", tags=["Scan"])
 logger = logging.getLogger(__name__)
 
 
-@router.post("/threat")
+@router.post("/threat", response_model=ScanResponse)
 def scan_threat(
     payload: ThreatScanRequest,
     request: Request,
@@ -46,14 +47,16 @@ def scan_threat(
         )
         raise_scan_error(500, "SCAN_PROCESSING_ERROR", "Scan could not be completed.")
 
-    response = build_scan_response(
-        analysis_type=ScanType.THREAT.value,
-        risk_score=result["risk_score"],
-        risk_level=result["risk_level"],
-        reasons=result["reasons"],
-        recommendation=result["recommendation"],
-        confidence=result["confidence"],
-        scan_id=scan_id,
+    response = ScanResponse.model_validate(
+        build_scan_response(
+            analysis_type=ScanType.THREAT.value,
+            risk_score=result.get("risk_score"),
+            risk_level=result.get("risk_level") or "UNKNOWN",
+            reasons=result.get("reasons"),
+            recommendation=result.get("recommendation"),
+            confidence=result.get("confidence"),
+            scan_id=scan_id,
+        )
     )
 
     log_scan_event(
@@ -95,15 +98,15 @@ def scan_threat(
             "id": scan_id,
             "user_id": str(current_user.id),
             "input_text": raw_text[:1000],
-            "risk": str(result["risk_level"]).lower(),
-            "score": int(result["risk_score"]),
-            "reasons": json.dumps(result["reasons"]),
+            "risk": str(response.risk_level or "UNKNOWN").lower(),
+            "score": int(response.risk_score),
+            "reasons": json.dumps(response.reasons),
             "scan_type": ScanType.THREAT.value,
         },
     )
     db.commit()
 
-    if int(result["risk_score"]) >= 70:
+    if int(response.risk_score) >= 70:
         try:
             enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None)
             event = create_alert_event(
@@ -111,13 +114,13 @@ def scan_threat(
                 user_id=current_user.id,
                 trigger_type="THREAT_HIGH_RISK_SCAN",
                 analysis_type="THREAT",
-                risk_score=int(result["risk_score"]),
+                risk_score=int(response.risk_score),
             )
             dispatch_plan_alerts(
                 db=db,
                 user=current_user,
                 trigger_type="THREAT_HIGH_RISK_SCAN",
-                risk_score=int(result["risk_score"]),
+                risk_score=int(response.risk_score),
                 scan_id=scan_id,
                 alert_event_id=event.id,
             )
