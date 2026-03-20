@@ -22,12 +22,20 @@ class ScanWorker:
             logger.info("scan_job_claimed", extra={"job_id": str(job.id), "scan_type": job.scan_type})
             process_scan_job(db, job)
             return True
+        except Exception:
+            logger.exception("scan_worker_run_once_error")
+            return False
         finally:
             db.close()
 
     def run_forever(self) -> None:
         ensure_scan_jobs_table()
+        logger.info("scan_worker_loop_started", extra={"idle_sleep_seconds": self.idle_sleep_seconds})
         while True:
-            processed = self.run_once()
+            try:
+                processed = self.run_once()
+            except Exception:
+                logger.exception("scan_worker_loop_error")
+                processed = False
             if not processed:
                 time.sleep(self.idle_sleep_seconds)

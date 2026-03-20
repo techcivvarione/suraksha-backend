@@ -5,9 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.routes.scan_base import require_user
+from app.services.risk_mapper import derive_risk_level_from_score
 from app.services.scan_jobs import get_scan_job_for_user
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
+
+_INVALID_RISK_LEVELS = {"", "UNKNOWN", "NONE", "NULL"}
 
 
 def _sanitized_failed_result() -> dict:
@@ -17,7 +20,7 @@ def _sanitized_failed_result() -> dict:
         "message": "Scan failed",
         "risk_score": 0,
         "score": 0,
-        "risk_level": "UNKNOWN",
+        "risk_level": "LOW",  # score 0 → LOW; never emit "UNKNOWN"
     }
 
 
@@ -51,7 +54,9 @@ def get_scan_result(
         safe_score = int(result.get("risk_score", result.get("score", 0)) or 0)
         result.setdefault("risk_score", safe_score)
         result.setdefault("score", safe_score)
-        result.setdefault("risk_level", result.get("risk_level") or "UNKNOWN")
+        # Never surface "UNKNOWN" to the client — derive from score if needed.
+        raw_rl = (result.get("risk_level") or "").strip().upper()
+        result["risk_level"] = raw_rl if raw_rl not in _INVALID_RISK_LEVELS else derive_risk_level_from_score(safe_score)
         result.setdefault("status", result.get("status") or safe_status)
 
     payload = {

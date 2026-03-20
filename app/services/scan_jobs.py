@@ -116,6 +116,10 @@ def claim_next_pending_job(db: Session) -> ScanJob | None:
 
 
 def process_scan_job(db: Session, job: ScanJob) -> None:
+    logger.info(
+        "scan_job_start",
+        extra={"job_id": str(job.id), "scan_type": job.scan_type, "user_id": str(job.user_id)},
+    )
     temp_path = None
     try:
         media_bytes = download_file(job.file_path)
@@ -129,6 +133,17 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
             db.add(job)
             _insert_scan_history(db, job=job, result=result)
 
+        logger.info(
+            "scan_job_complete",
+            extra={
+                "job_id": str(job.id),
+                "scan_type": job.scan_type,
+                "risk_score": result.get("risk_score"),
+                "risk_level": result.get("risk_level"),
+                "provider_used": result.get("provider_used"),
+            },
+        )
+
         _trigger_realtime_alerts(db, job=job, result=result)
 
         log_scan_event(
@@ -141,7 +156,10 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
             provider_used=result.get("provider_used"),
         )
     except Exception as exc:
-        logger.exception("scan_job_failed", extra={"job_id": str(job.id), "scan_type": job.scan_type})
+        logger.exception(
+            "scan_job_failed",
+            extra={"job_id": str(job.id), "scan_type": job.scan_type, "error": str(exc)},
+        )
         with db.begin():
             job.status = "failed"
             job.result_json = json.dumps(_scan_failure_payload())

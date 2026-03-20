@@ -185,6 +185,8 @@ async def success_response_envelope(request: Request, call_next):
 
 @app.on_event("startup")
 def startup():
+    import threading
+
     logger.info("startup_begin")
 
     from app.services.reality_detection.engine import validate_runtime_dependencies
@@ -198,6 +200,25 @@ def startup():
         logger.info("rss_ingestion_completed")
     except Exception:
         logger.exception("rss_ingestion_skipped")
+
+    # Start the scan-job worker as a daemon background thread so reality scans
+    # (image / video / audio) transition from "pending" → "completed" without
+    # requiring a separately launched worker_runner.py process.
+    # The thread is a daemon so it is automatically killed when the main process exits.
+    # ScanWorker.run_forever() creates its own SQLAlchemy sessions and uses
+    # asyncio.run() internally, which is safe from a plain non-async thread.
+    try:
+        from app.workers.scan_worker import ScanWorker
+
+        _worker_thread = threading.Thread(
+            target=ScanWorker().run_forever,
+            name="scan-job-worker",
+            daemon=True,
+        )
+        _worker_thread.start()
+        logger.info("scan_worker_thread_started", extra={"thread": _worker_thread.name})
+    except Exception:
+        logger.exception("scan_worker_thread_start_failed")
 
     logger.info("startup_complete")
 
