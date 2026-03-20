@@ -106,7 +106,7 @@ def scan_threat(
     )
     db.commit()
 
-    final_payload = response.model_dump(mode="json")
+    final_payload = response.model_dump(mode="json", exclude_none=True)
     logger.info(
         "scan_threat_response",
         extra={

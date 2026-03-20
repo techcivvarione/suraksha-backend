@@ -72,7 +72,7 @@ def analyze_threat(text: str) -> dict:
         "analysis_type": ScanType.THREAT.value,
         "risk_score": risk["risk_score"],
         "risk_level": risk["risk_level"],
-        "confidence": None,
+        "confidence": round(probability, 2),
         "reasons": reasons,
         "recommendation": recommendation,
     }
