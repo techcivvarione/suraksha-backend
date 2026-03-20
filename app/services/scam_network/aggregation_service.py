@@ -94,6 +94,59 @@ def _update_phishing_link(db: Session, report) -> bool:
     else:
         aggregate.status = 'REPORTED_PATTERN'
     return False
+def fetch_trending(db: Session, limit: int = 10) -> list[dict]:
+    """Return top scam campaigns ordered by 24h report count for the trending feed."""
+    rows = db.execute(
+        text(
+            '''
+            SELECT
+                sn.normalized_phone_number,
+                sn.display_phone_number,
+                sn.top_category,
+                sn.report_count_24h,
+                sn.top_regions
+            FROM scam_numbers sn
+            WHERE sn.status = 'CONFIRMED_PATTERN'
+            ORDER BY sn.report_count_24h DESC
+            LIMIT :limit
+            '''
+        ),
+        {'limit': limit},
+    ).mappings().all()
+
+    campaigns = []
+    for i, row in enumerate(rows):
+        top_regions = row['top_regions'] or []
+        regions_affected = [
+            r.get('state') or r.get('country') or 'Unknown'
+            for r in top_regions
+            if r.get('state') or r.get('country')
+        ]
+        category = row['top_category']
+        report_count = int(row['report_count_24h'] or 0)
+        campaigns.append({
+            'id': row['normalized_phone_number'] or str(i),
+            'scamType': category or 'Unknown',
+            'reportCount': report_count,
+            'regionsAffected': regions_affected[:5],
+            'explanation': f'{report_count} user{"s" if report_count != 1 else ""} reported suspicious activity in the last 24 hours.',
+            'preventionTips': _prevention_tips_for_category(category),
+            'category': category,
+            'recentActivityTimeline': [],
+        })
+    return campaigns
+
+
+def _prevention_tips_for_category(category: str | None) -> list[str]:
+    tips: dict[str, list[str]] = {
+        'call': ['Never share your OTP over the phone', 'Verify caller identity independently'],
+        'sms': ['Do not click links in unsolicited SMS', 'Report suspicious messages to your carrier'],
+        'link': ['Check the URL before clicking', 'Keep your browser and antivirus updated'],
+        'payment': ['Verify payment requests through official channels', 'Never transfer money under urgency'],
+    }
+    return tips.get((category or '').lower(), ['Stay alert', 'Report suspicious activity to authorities'])
+
+
 def fetch_alerts(db: Session, *, state: str | None, country: str | None, limit: int, offset: int) -> tuple[list[dict], int]:
     rows = db.execute(
         text(

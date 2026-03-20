@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -86,3 +86,29 @@ class ScamAlertItem(BaseModel):
 class ScamAlertsResponse(BaseModel):
     alerts: list[ScamAlertItem]
     total: int
+
+
+# ---- Frontend-compatible (camelCase) campaign schemas ----
+
+class ScamActivityPoint(BaseModel):
+    label: str
+    value: int
+
+
+class ScamCampaignItem(BaseModel):
+    """Matches the Android ScamAlertCampaign data class (camelCase field names)."""
+    id: str
+    scamType: str
+    reportCount: int
+    regionsAffected: List[str] = []
+    explanation: str
+    preventionTips: List[str] = []
+    category: str | None = None
+    recentActivityTimeline: List[ScamActivityPoint] = []
+
+
+class ScamCampaignPageResponse(BaseModel):
+    """Matches the Android ScamAlertPageResponse data class (camelCase field names)."""
+    items: List[ScamCampaignItem] = []
+    page: int = 1
+    hasMore: bool = False

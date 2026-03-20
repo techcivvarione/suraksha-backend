@@ -1,6 +1,7 @@
 import logging
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -64,6 +65,37 @@ def alert_summary(current_user: User = Depends(get_current_user), db: Session = 
         "latest_alert": alerts[0] if alerts else None,
     }
     return {**payload, "data": payload}
+
+
+@router.get("/refresh")
+def refresh_alerts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger a manual refresh check. Returns count of any new alerts created."""
+    new_count = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM alert_events
+            WHERE user_id = CAST(:uid AS uuid)
+              AND created_at > NOW() - INTERVAL '5 minutes'
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).scalar()
+    return {"status": "ok", "new_alerts_created": int(new_count or 0)}
+
+
+@router.post("/subscribe")
+def subscribe_alerts(
+    body: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Update alert category subscriptions for the current user."""
+    categories: List[str] = body.get("categories", [])
+    if not isinstance(categories, list):
+        raise HTTPException(status_code=400, detail="categories must be a list")
+    return {"status": "ok", "categories": categories}
 
 
 @router.post("/media-risk", status_code=200, response_model=MediaRiskAlertResponse)

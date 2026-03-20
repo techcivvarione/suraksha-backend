@@ -49,7 +49,7 @@ if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY not set in environment")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days default
 OTP_SECRET_SALT = os.getenv("OTP_SECRET_SALT")
 if not OTP_SECRET_SALT:
     raise RuntimeError("OTP_SECRET_SALT not set in environment")
@@ -86,12 +86,6 @@ class VerifyEmailOtpRequest(BaseModel):
 
     email: EmailStr
     otp: str
-
-
-class GoogleAuthRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id_token: str
 
 
 GENERIC_SEND_RESPONSE = {"message": "If the email is valid, an OTP has been sent."}
@@ -693,8 +687,46 @@ def delete_account(
 
 
 @router.post("/google")
-def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depends(get_db)):
-    return _handle_google_login(google_token=payload.id_token, request=request, db=db)
+def google_auth(payload: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
+    return _handle_google_login(google_token=payload.google_id_token, request=request, db=db)
+
+
+@router.post("/refresh")
+def refresh_token(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+    """Issue a new JWT for a valid, non-revoked token (even near-expiry)."""
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"leeway": 3600},  # accept tokens up to 1h past exp
+        )
+    except JWTError:
+        raise _auth_error("INVALID_TOKEN", "Invalid token")
+
+    user_id = payload.get("user_id") or payload.get("sub")
+    token_version = payload.get("token_version", payload.get("tv"))
+    issued_at = payload.get("issued_at", payload.get("iat"))
+
+    if not user_id or token_version is None or issued_at is None:
+        raise _auth_error("INVALID_TOKEN", "Invalid token")
+
+    user = _load_user_with_token_version(db, str(user_id))
+    if not user:
+        raise _auth_error("INVALID_TOKEN", "Invalid token")
+    if int(token_version) != _effective_token_version(user):
+        raise _auth_error("TOKEN_EXPIRED", "Token has been revoked")
+
+    if user.password_changed_at:
+        issued_at_dt = datetime.fromtimestamp(int(issued_at), tz=timezone.utc)
+        pwd_changed = user.password_changed_at if user.password_changed_at.tzinfo else user.password_changed_at.replace(tzinfo=timezone.utc)
+        if issued_at_dt < pwd_changed:
+            raise _auth_error("TOKEN_EXPIRED", "Token expired after password change")
+
+    return {
+        "access_token": create_access_token(user),
+        "token_type": "bearer",
+    }
 
 
 @router.get("/me", response_model=AuthMeResponse)

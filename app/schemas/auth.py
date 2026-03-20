@@ -9,8 +9,8 @@ class SignupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    email: Optional[str]
-    phone_number: Optional[str]
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
     phone: Optional[str] = None
     password: str
     confirm_password: str

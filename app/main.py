@@ -109,7 +109,7 @@ app.add_middleware(SecurityLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 configured_origins = os.getenv("CORS_ORIGINS", "").strip()
-allow_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()] if configured_origins else ["http://localhost:3000", "http://127.0.0.1:3000"]
+allow_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()] if configured_origins else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,

@@ -7,6 +7,8 @@ from app.db import get_db
 from app.routes.auth import get_current_user
 from app.schemas.scam_network import (
     ScamAlertsResponse,
+    ScamCampaignItem,
+    ScamCampaignPageResponse,
     ScamMessageCheckRequest,
     ScamMessageCheckResponse,
     ScamNumberCheckRequest,
@@ -16,7 +18,7 @@ from app.schemas.scam_network import (
     ScamVerifyCallResponse,
 )
 from app.services.scam_network.abuse_guard import ScamNetworkAbuseError
-from app.services.scam_network.aggregation_service import fetch_alerts, get_number_intelligence
+from app.services.scam_network.aggregation_service import fetch_alerts, fetch_trending, get_number_intelligence
 from app.services.scam_network.message_detection import analyze_message_text
 from app.services.scam_network.normalization import normalize_phone_number
 from app.services.scam_network.report_service import ScamReportService, record_scan_event
@@ -100,17 +102,44 @@ def check_message(
     )
 
 
-@router.get('/alerts', response_model=ScamAlertsResponse, summary='List scam alert network events')
-def scam_alerts(
-    state: str | None = Query(None),
-    country: str | None = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+@router.get('/trending', response_model=list[ScamCampaignItem], summary='Get trending scam campaigns')
+def trending_scams(
+    limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    alerts, total = fetch_alerts(db, state=state, country=country, limit=limit, offset=offset)
-    return ScamAlertsResponse(alerts=alerts, total=total)
+    campaigns = fetch_trending(db, limit=limit)
+    return campaigns
+
+
+@router.get('/alerts', response_model=ScamCampaignPageResponse, summary='List scam alert network events')
+def scam_alerts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    state: str | None = Query(None),
+    country: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    limit = page_size
+    offset = (page - 1) * page_size
+    raw_alerts, total = fetch_alerts(db, state=state, country=country, limit=limit, offset=offset)
+    has_more = (offset + limit) < total
+    items = [
+        ScamCampaignItem(
+            id=str(a['id']),
+            scamType=a.get('category') or a.get('entity_type') or 'Unknown',
+            reportCount=int(a.get('report_count_24h') or 0),
+            regionsAffected=[a['region'].get('state') or a['region'].get('country') or 'Unknown']
+            if a.get('region') else [],
+            explanation=a.get('message') or 'Reported as suspicious.',
+            preventionTips=[],
+            category=a.get('category'),
+            recentActivityTimeline=[],
+        )
+        for a in raw_alerts
+    ]
+    return ScamCampaignPageResponse(items=items, page=page, hasMore=has_more)
 
 
 @router.post('/verify-call', response_model=ScamVerifyCallResponse, summary='Verify whether an incoming phone number was reported as suspicious')
