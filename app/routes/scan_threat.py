@@ -54,7 +54,7 @@ def scan_threat(
             risk_level=result.get("risk_level") or "UNKNOWN",
             reasons=result.get("reasons"),
             recommendation=result.get("recommendation"),
-            confidence=result.get("confidence"),
+            confidence=float(result.get("confidence") or 0.0),
             scan_id=scan_id,
         )
     )
@@ -106,6 +106,17 @@ def scan_threat(
     )
     db.commit()
 
+    final_payload = response.model_dump(mode="json")
+    logger.info(
+        "scan_threat_response",
+        extra={
+            "user_id": str(current_user.id),
+            "scan_id": str(scan_id),
+            "payload": final_payload,
+            "endpoint": "/scan/threat",
+        },
+    )
+
     if int(response.risk_score) >= 70:
         try:
             enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None)
@@ -130,4 +141,4 @@ def scan_threat(
         except Exception:
             logger.exception("threat_scan_alert_failed", extra={"scan_id": scan_id, "user_id": str(current_user.id)})
 
-    return response
+    return final_payload

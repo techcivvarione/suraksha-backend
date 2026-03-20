@@ -74,3 +74,45 @@ def test_threat_response_uses_unknown_when_risk_level_missing(client, auth_token
     data = resp.json()
     assert "risk_level" in data
     assert data["risk_level"] == "UNKNOWN"
+
+
+def test_threat_response_is_not_enveloped(client, auth_token):
+    resp = client.post(
+        "/scan/threat",
+        headers={"Authorization": f"Bearer {auth_token}"},
+        json={"text": "hello world"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "data" not in data
+    assert "risk_level" in data
+    assert "score" in data
+    assert "confidence" in data
+
+
+def test_threat_response_confidence_is_numeric_when_analyzer_omits_it(client, auth_token, monkeypatch):
+    from app.routes import scan_threat as scan_threat_route
+
+    monkeypatch.setattr(
+        scan_threat_route,
+        "analyze_threat",
+        lambda text: {
+            "analysis_type": "THREAT",
+            "risk_score": 10,
+            "risk_level": "LOW",
+            "confidence": None,
+            "reasons": ["No strong threat indicators detected"],
+            "recommendation": "No major threats detected; stay cautious.",
+        },
+    )
+
+    resp = client.post(
+        "/scan/threat",
+        headers={"Authorization": f"Bearer {auth_token}"},
+        json={"text": "hello world"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["confidence"] == 0.0

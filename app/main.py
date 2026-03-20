@@ -136,6 +136,8 @@ async def success_response_envelope(request: Request, call_next):
 
     if request.url.path.startswith(_DOC_PATH_PREFIXES):
         return response
+    if request.url.path == "/scan/threat":
+        return response
     if response.status_code < 200 or response.status_code >= 300 or response.status_code == 204:
         return response
 
