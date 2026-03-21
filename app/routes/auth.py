@@ -39,6 +39,7 @@ from app.services.email_service import send_otp_email
 from app.services.phone_otp_service import create_phone_otp, normalize_phone, verify_phone_otp
 from app.services.sms_service import SMSDeliveryError, send_sms
 from app.services.subscription import maybe_auto_downgrade_expired_subscription
+from app.services.supabase_sync import ensure_supabase_user_async
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
@@ -539,6 +540,10 @@ def verify_phone_otp_login(
     user, is_new_user = _resolve_phone_user_identity(db, phone=normalized_phone, current_user=current_user)
     logger.info("auth.phone_login", extra={"user_id": str(user.id), "phone_suffix": normalized_phone[-4:]})
     create_audit_log(db=db, user_id=user.id, event_type="PHONE_OTP_LOGIN_SUCCESS", event_description="User logged in with phone OTP", request=request)
+
+    # Mirror user into Supabase auth in background — never blocks phone login
+    ensure_supabase_user_async(user.id)
+
     payload = _token_response(user, needs_phone_verification=False)
     payload["user"] = _auth_user_payload(user)
     payload["is_new_user"] = is_new_user
@@ -597,6 +602,10 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
             {"uid": str(user.id), "email": user.email},
         )
         db.commit()
+
+    # Mirror new user into Supabase auth in background — never blocks signup
+    ensure_supabase_user_async(user.id)
+
     logger.info("auth.signup", extra={"user_id": str(user.id)})
     return {"status": "signup_success"}
 
@@ -615,6 +624,10 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     user = _touch_last_login(db, user, "email")
     logger.info("auth.email_login", extra={"user_id": str(user.id)})
     create_audit_log(db=db, user_id=user.id, event_type="LOGIN_SUCCESS", event_description="User logged in", request=request)
+
+    # Opportunistically sync pre-migration users in background — never blocks login
+    ensure_supabase_user_async(user.id)
+
     return _token_response(user, needs_phone_verification=False, include_terms=True)
 
 
@@ -646,6 +659,10 @@ def _handle_google_login(*, google_token: str, request: Request, db: Session) ->
     needs_phone_verification = not bool(getattr(user, "phone_verified", False))
     logger.info("auth.google_login", extra={"user_id": str(user.id), "needs_phone_verification": needs_phone_verification})
     create_audit_log(db=db, user_id=user.id, event_type="GOOGLE_LOGIN_SUCCESS", event_description="User logged in with Google", request=request)
+
+    # Mirror user into Supabase auth in background — never blocks Google login
+    ensure_supabase_user_async(user.id)
+
     payload = _token_response(user, needs_phone_verification=needs_phone_verification)
     payload["user"] = _auth_user_payload(user)
     payload["phone_verified"] = bool(getattr(user, "phone_verified", False))
