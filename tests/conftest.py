@@ -142,30 +142,11 @@ class FakeRedis:
         return 1 if current <= int(limit) else 0
 
 
-class StubDetector:
-    def __init__(self, probability):
-        self.probability = probability
-
-    async def detect(self, file_path, mime_type, filename=None, fast_mode=False):
-        return {"probability": self.probability, "provider_used": "stub-provider"}
-
-
 @pytest.fixture(autouse=True)
 def redis_mock(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(redis_store, "_redis_client", fake)
     return fake
-
-
-@pytest.fixture(autouse=True)
-def stub_detectors(monkeypatch):
-    import app.routes.scan_reality_audio as scan_reality_audio
-    import app.routes.scan_reality_image as scan_reality_image
-    import app.routes.scan_reality_video as scan_reality_video
-
-    monkeypatch.setattr(scan_reality_image, "image_detector", StubDetector(0.2))
-    monkeypatch.setattr(scan_reality_video, "video_detector", StubDetector(0.8))
-    monkeypatch.setattr(scan_reality_audio, "audio_detector", StubDetector(0.6))
 
 
 @pytest.fixture

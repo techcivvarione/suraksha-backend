@@ -1,13 +1,14 @@
-import logging
+"""worker_runner.py — legacy entry point, no longer needed.
 
-from app.workers.scan_worker import ScanWorker
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
+The async scan job worker has been removed. Image scanning is now handled
+synchronously by POST /scan/image with no background worker required.
+"""
+import sys
 
 if __name__ == "__main__":
-    ScanWorker().run_forever()
+    print(
+        "The scan worker is no longer required.\n"
+        "Image scanning is now synchronous via POST /scan/image.\n"
+        "Start the API with: uvicorn app.main:app --reload"
+    )
+    sys.exit(0)

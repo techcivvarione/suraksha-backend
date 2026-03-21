@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 _DOC_PATH_PREFIXES = ("/docs", "/openapi.json", "/redoc")
 
 
-def _is_scan_path(path: str) -> bool:
-    return path.startswith("/scan")
-
-
 def _error_payload(*, error_code: str, message: str) -> dict:
     return {
         "status": "error",
@@ -185,13 +181,7 @@ async def success_response_envelope(request: Request, call_next):
 
 @app.on_event("startup")
 def startup():
-    import threading
-
     logger.info("startup_begin")
-
-    from app.services.reality_detection.engine import validate_runtime_dependencies
-
-    validate_runtime_dependencies()
 
     try:
         from app.services.news_ingestor import ingest_rss
@@ -201,25 +191,6 @@ def startup():
     except Exception:
         logger.exception("rss_ingestion_skipped")
 
-    # Start the scan-job worker as a daemon background thread so reality scans
-    # (image / video / audio) transition from "pending" → "completed" without
-    # requiring a separately launched worker_runner.py process.
-    # The thread is a daemon so it is automatically killed when the main process exits.
-    # ScanWorker.run_forever() creates its own SQLAlchemy sessions and uses
-    # asyncio.run() internally, which is safe from a plain non-async thread.
-    try:
-        from app.workers.scan_worker import ScanWorker
-
-        _worker_thread = threading.Thread(
-            target=ScanWorker().run_forever,
-            name="scan-job-worker",
-            daemon=True,
-        )
-        _worker_thread.start()
-        logger.info("scan_worker_thread_started", extra={"thread": _worker_thread.name})
-    except Exception:
-        logger.exception("scan_worker_thread_start_failed")
-
     logger.info("startup_complete")
 
 
@@ -228,7 +199,6 @@ from app.routes.profile import router as profile_router
 from app.routes.news import router as news_router
 from app.routes.home import router as home_router
 from app.routes.history import router as history_router
-from app.routes.analyze_ocr import router as analyze_ocr_router
 from app.routes.security import router as security_router
 from app.routes.trusted_contacts import router as trusted_contacts_router, legacy_router as trusted_contacts_legacy_router
 from app.routes.alerts import router as alerts_router
@@ -242,17 +212,13 @@ from app.routes.trusted_alerts import router as trusted_alerts_router
 from app.routes.cyber_card import router as cyber_card_router
 from app.routes.scam_confirmation import router as scam_confirmation_router
 from app.routes.scam_network import router as scam_network_router
-from app.routes.ai_image_router import router as ai_image_router
 from app.routes.qr_secure import router as qr_secure_router
 from app.routes.media import router as media_router
 from app.routes.scan_password import router as scan_password_router
 from app.routes.scan_email import router as scan_email_router
 from app.routes.scan_qr import router as scan_qr_router
 from app.routes.scan_threat import router as scan_threat_router
-from app.routes.scan_reality_image import router as scan_reality_image_router
-from app.routes.scan_reality_video import router as scan_reality_video_router
-from app.routes.scan_reality_audio import router as scan_reality_audio_router
-from app.routes.scan_results import router as scan_results_router
+from app.routes.scan_image import router as scan_image_router
 from app.routes.devices import router as devices_router
 from app.routes.billing import router as billing_router
 from app.routes.webhooks import router as webhooks_router
@@ -262,7 +228,6 @@ app.include_router(profile_router)
 app.include_router(news_router)
 app.include_router(home_router)
 app.include_router(history_router)
-app.include_router(analyze_ocr_router)
 app.include_router(security_router)
 app.include_router(trusted_contacts_router)
 app.include_router(trusted_contacts_legacy_router)
@@ -277,17 +242,13 @@ app.include_router(trusted_alerts_router)
 app.include_router(cyber_card_router)
 app.include_router(scam_confirmation_router)
 app.include_router(scam_network_router)
-app.include_router(ai_image_router)
 app.include_router(qr_secure_router)
 app.include_router(media_router)
 app.include_router(scan_password_router)
 app.include_router(scan_email_router)
 app.include_router(scan_qr_router)
 app.include_router(scan_threat_router)
-app.include_router(scan_reality_image_router)
-app.include_router(scan_reality_video_router)
-app.include_router(scan_reality_audio_router)
-app.include_router(scan_results_router)
+app.include_router(scan_image_router)
 app.include_router(devices_router)
 app.include_router(billing_router)
 app.include_router(webhooks_router)
@@ -296,4 +257,3 @@ app.include_router(webhooks_router)
 @app.get("/health")
 def health_check():
     return {"service": "go-suraksha-backend", "version": "1.0.0"}
-
