@@ -660,51 +660,78 @@ async def explain_image(
     if plan != TIER_ULTRA:
         if not allow_daily_limit("scan:image:explain:user", 20, str(current_user.id)):
             raise HTTPException(status_code=429, detail="Daily AI explain limit reached. Try again tomorrow.")
+
+    # ── Simple-language system prompt ─────────────────────────────────────────
+    _SYSTEM = (
+        "You are a cybersecurity assistant for everyday users, including people in rural India. "
+        "Explain image scan results in very simple language — like talking to a family member "
+        "who does not know anything about technology. "
+        "Never use technical words. Banned: metadata, entropy, compression, artifact, heuristic, "
+        "anomaly, algorithm, pixel, exif, JPEG, synthesis. "
+        "Write exactly 3 short sentences: "
+        "1) Is this image real or fake — clear verdict. "
+        "2) One simple reason why. "
+        "3) What the person should do. "
+        "No bullet points, no headings. Plain paragraph."
+    )
+
     try:
         import openai  # guarded import — keeps startup fast when unused
 
         client = openai.OpenAI()  # reads OPENAI_API_KEY from environment
-        signals_text = "; ".join(body.highlights[:5]) if body.highlights else "none"
+        # Use at most 3 highlights, strip technical signal codes embedded in brackets
+        highlights_clean = [
+            h for h in body.highlights[:3]
+            if not h.isupper()  # skip raw signal codes like "AI_SOFTWARE_TAG"
+        ]
+        signals_text = "; ".join(highlights_clean) if highlights_clean else "no obvious problems found"
+
+        if body.risk_score >= 61:
+            verdict_hint = "This image is very likely fake or AI-generated."
+        elif body.risk_score >= 31:
+            verdict_hint = "This image may have been edited or created by a computer."
+        else:
+            verdict_hint = "This image looks like a real photograph."
+
         prompt = (
-            f"An image authenticity scan assigned a risk score of {body.risk_score}/100. "
-            f"Summary: {body.summary}. "
-            f"Key findings: {signals_text}. "
-            "In 2–3 plain English sentences explain what this means for an everyday person. "
-            "Be clear and direct. Avoid all technical jargon."
+            f"An image was scanned. Result: {verdict_hint} "
+            f"Risk score: {body.risk_score} out of 100. "
+            f"What we found: {signals_text}. "
+            "In 3 short sentences, explain this to a person who does not know technology: "
+            "is it real or fake, why you think so, and what they should do."
         )
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=120,
-            temperature=0.4,
+            messages=[
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user",   "content": prompt},
+            ],
+            max_tokens=130,
+            temperature=0.3,
         )
-        explanation = response.choices[0].message.content.strip()
+        explanation = (response.choices[0].message.content or "").strip()
+        if not explanation:
+            raise ValueError("Empty response from OpenAI")
 
     except Exception:
-        # Template fallback — always returns something useful
-        n = len(body.highlights)
-        signal_word = (
-            "several suspicious patterns were identified"
-            if n > 1
-            else "a suspicious pattern was identified"
-        )
+        # Simple, human fallback — no jargon, always 3 sentences
         if body.risk_score >= 61:
             explanation = (
-                f"{body.summary} "
-                f"During analysis, {signal_word}. "
-                "We recommend verifying this image independently before sharing or trusting it."
+                "This image may not be real. "
+                "We found signs that it could have been made by a computer or heavily edited. "
+                "Be careful before trusting, sharing, or acting on this image."
             )
         elif body.risk_score >= 31:
             explanation = (
-                f"{body.summary} "
-                "Some indicators were found that may suggest editing or AI involvement. "
-                "Use caution if this image is being used in an important context."
+                "This image has some unusual signs but we are not fully sure. "
+                "It could be a real photo that was slightly changed, or it may have been created digitally. "
+                "Check where this image came from before trusting it."
             )
         else:
             explanation = (
-                f"{body.summary} "
-                "The image passed all standard checks and appears to be a genuine photograph. "
-                "No action is required."
+                "This looks like a normal photo. "
+                "We did not find strong signs that it was created by a computer or edited. "
+                "It is likely a real photograph taken with a camera."
             )
 
     return {"explanation": explanation}
