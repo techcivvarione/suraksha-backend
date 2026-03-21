@@ -2,7 +2,8 @@ import hashlib
 import logging
 import time
 import uuid
-from typing import List
+from typing import List, Optional
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from redis.exceptions import RedisError
@@ -76,12 +77,31 @@ def analyze_qr(
         upi_impersonation = False
         blacklist_hit = False
 
+        # UPI payment fields — populated only for UPI QR codes
+        is_payment: bool = False
+        merchant_name: Optional[str] = None
+        upi_id: Optional[str] = None
+        amount: Optional[float] = None
+
         if detected_type == QrType.UPI:
             ok, upi_reasons = validate_upi(meta["uri"])
             reasons.extend(upi_reasons)
             upi_impersonation = any(
                 kw in meta["uri"].lower() for kw in ("support", "refund", "update", "kyc")
             )
+            # Extract human-readable payment fields from UPI URI
+            is_payment = True
+            try:
+                parsed_upi = urlparse(meta["uri"])
+                params = parse_qs(parsed_upi.query)
+                upi_id = (params.get("pa") or [None])[0]
+                raw_name = (params.get("pn") or [None])[0]
+                merchant_name = raw_name.strip() if raw_name else None
+                raw_amount = (params.get("am") or [None])[0]
+                if raw_amount:
+                    amount = float(raw_amount)
+            except Exception:
+                pass  # Best-effort; leave as None if parsing fails
         elif detected_type == QrType.URL:
             ok, url_reasons, url_meta = validate_url(meta["url"])
             reasons.extend(url_reasons)
@@ -126,6 +146,32 @@ def analyze_qr(
             "HIGH": "Do not proceed; treat as malicious.",
         }[risk_level]
 
+        # Human-readable summary
+        payee = merchant_name or upi_id or "Unknown"
+        summary: Optional[str] = None
+        if is_payment:
+            if risk_level == "LOW":
+                summary = (
+                    f"No suspicious or hidden amount detected. "
+                    f"{payee} appears to be a legitimate payment recipient."
+                )
+            elif risk_level == "MEDIUM":
+                summary = (
+                    f"This payment to {payee} has some risk indicators. "
+                    "Verify with the sender before proceeding."
+                )
+            else:
+                summary = (
+                    f"This QR code is dangerous. Do NOT proceed with payment to {payee}."
+                )
+        else:
+            if risk_level == "LOW":
+                summary = "This QR code looks safe. No known threats detected."
+            elif risk_level == "MEDIUM":
+                summary = "This QR code has some risk indicators. Verify the source before opening."
+            else:
+                summary = "This QR code is dangerous. Do not open it."
+
         logger.info(
             "QR analyze completed",
             extra={
@@ -144,10 +190,14 @@ def analyze_qr(
             risk_score=risk_score,
             risk_level=risk_level,
             detected_type=detected_type.value,
-            original_payload=normalized,
             reasons=reasons or ["No issues detected"],
             recommended_action=recommended_action,
             is_flagged=is_flagged,
+            is_payment=is_payment,
+            merchant_name=merchant_name,
+            upi_id=upi_id,
+            amount=amount,
+            summary=summary,
         )
     except HTTPException:
         raise

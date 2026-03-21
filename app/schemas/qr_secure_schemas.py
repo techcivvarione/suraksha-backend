@@ -18,10 +18,16 @@ class QrAnalyzeResponse(BaseModel):
     risk_score: int
     risk_level: str
     detected_type: str
-    original_payload: str
+    # original_payload intentionally omitted from response — no raw data to client
     reasons: List[str]
     recommended_action: str
     is_flagged: bool
+    # UPI / payment fields (populated only when detected_type == "UPI")
+    is_payment: bool = False
+    merchant_name: Optional[str] = None
+    upi_id: Optional[str] = None
+    amount: Optional[float] = None
+    summary: Optional[str] = None
 
 
 class QrReportPayload(BaseModel):
