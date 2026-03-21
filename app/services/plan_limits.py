@@ -39,14 +39,14 @@ _LIMIT_TO_CONFIG: dict[LimitType, dict[str, Any]] = {
     },
     LimitType.EMAIL_MONTHLY: {
         "plan_limit": Limit.EMAIL_MONTHLY,
-        "window": "monthly",
-        "namespace": "plan-limit:email:monthly",
+        "window": "weekly",
+        "namespace": "plan-limit:email:weekly",
         "feature": "EMAIL_BREACH_COUNT",
     },
     LimitType.PASSWORD_MONTHLY: {
         "plan_limit": Limit.PASSWORD_MONTHLY,
-        "window": "monthly",
-        "namespace": "plan-limit:password:monthly",
+        "window": "weekly",
+        "namespace": "plan-limit:password:weekly",
         "feature": "PASSWORD_SCAN",
     },
     LimitType.QR_WEEKLY: {

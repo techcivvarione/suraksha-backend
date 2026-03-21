@@ -4,7 +4,7 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException, Request
 from email_validator import EmailNotValidError, validate_email
 
-from app.core.features import normalize_plan
+from app.core.features import Feature, has_feature, normalize_plan
 from app.routes.scan_base import (
     apply_scan_rate_limits,
     generate_scan_id,
@@ -76,7 +76,7 @@ def scan_email(
         "confidence": result["confidence"],
         "breach_count": result.get("breach_count"),
     }
-    if plan != "FREE":
+    if has_feature(current_user, Feature.EMAIL_BREACH_DETAILS):
         base_response["breaches"] = result.get("breaches")
 
     response = build_scan_response(

@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+# =============================================================================
+# features.py — SINGLE SOURCE OF TRUTH for all plan features and limits
+#
+# Plan matrix:
+#   FREE:      email 1/week, threat 1/day, password 1/week, QR 1/week,
+#              image 1/lifetime, AI ❌, contacts 0
+#   GO_PRO:    everything unlimited, AI explain 20/day, contacts 3,
+#              automatic alerts, priority SOS
+#   GO_ULTRA:  everything unlimited, AI explain unlimited, contacts 6,
+#              real-time alerts, family dashboard
+# =============================================================================
+
 from enum import Enum
 from typing import Any
 
@@ -20,16 +32,19 @@ class Feature(str, Enum):
 
 class Limit(str, Enum):
     TRUSTED_CONTACT_MAX = "TRUSTED_CONTACT_MAX"
+    # FREE: 1/day;  PRO/ULTRA: None (unlimited)
     THREAT_DAILY = "THREAT_DAILY"
+    # FREE: 1/week; PRO/ULTRA: None — window enforced in plan_limits.py
     EMAIL_MONTHLY = "EMAIL_MONTHLY"
+    # FREE: 1/week; PRO/ULTRA: None — window enforced in plan_limits.py
     PASSWORD_MONTHLY = "PASSWORD_MONTHLY"
+    # FREE: 1/week; PRO/ULTRA: None
     QR_WEEKLY = "QR_WEEKLY"
+    # FREE: 1 lifetime; PRO/ULTRA: None
     AI_IMAGE_LIFETIME = "AI_IMAGE_LIFETIME"
-    ANALYZE_DAILY_THREAT = "ANALYZE_DAILY_THREAT"
-    ANALYZE_DAILY_EMAIL = "ANALYZE_DAILY_EMAIL"
-    ANALYZE_DAILY_PASSWORD = "ANALYZE_DAILY_PASSWORD"
-    QR_WEEKLY_SCAN = "QR_WEEKLY_SCAN"
-    QR_WEEKLY_REPORT = "QR_WEEKLY_REPORT"
+    # PRO: 20/day;  ULTRA: None (unlimited); FREE: 0 (blocked at feature layer)
+    AI_EXPLAIN_DAILY = "AI_EXPLAIN_DAILY"
+    # --- global (not plan-scoped) ---
     EMAIL_MAX_LENGTH = "EMAIL_MAX_LENGTH"
     EMAIL_GLOBAL_COOLDOWN_SECONDS = "EMAIL_GLOBAL_COOLDOWN_SECONDS"
     EMAIL_DUPLICATE_SCAN_BLOCK_SECONDS = "EMAIL_DUPLICATE_SCAN_BLOCK_SECONDS"
@@ -44,9 +59,6 @@ class Limit(str, Enum):
 TIER_FREE = "FREE"
 TIER_PRO = "GO_PRO"
 TIER_ULTRA = "GO_ULTRA"
-PLAN_FAMILY_BASIC = "FAMILY_BASIC"
-PLAN_FAMILY_PRO = "FAMILY_PRO"
-
 
 PLAN_ALIASES = {
     "FREE": TIER_FREE,
@@ -64,10 +76,9 @@ PLAN_ALIASES = {
     "GO_ULTRA": TIER_ULTRA,
     "GOULTRA": TIER_ULTRA,
     "ENTERPRISE": TIER_ULTRA,
-    PLAN_FAMILY_BASIC: PLAN_FAMILY_BASIC,
-    PLAN_FAMILY_PRO: PLAN_FAMILY_PRO,
 }
 
+# ── Per-plan feature gates ─────────────────────────────────────────────────
 
 GO_PRO_FEATURES: set[Feature] = {
     Feature.EMAIL_BREACH_COUNT,
@@ -82,98 +93,53 @@ GO_PRO_FEATURES: set[Feature] = {
 }
 
 GO_ULTRA_FEATURES: set[Feature] = GO_PRO_FEATURES | {
+    Feature.FAMILY_ALERTS,
     Feature.ULTRA_PRIORITY_PIPELINE,
 }
-
 
 PLAN_FEATURES: dict[str, set[Feature]] = {
     TIER_FREE: {
         Feature.EMAIL_BREACH_COUNT,
-        Feature.TRUSTED_CONTACT_LIMIT,
+        # FREE has 0 contacts; TRUSTED_CONTACT_LIMIT feature not granted
     },
     TIER_PRO: GO_PRO_FEATURES,
     TIER_ULTRA: GO_ULTRA_FEATURES,
-    PLAN_FAMILY_BASIC: {
-        Feature.EMAIL_BREACH_COUNT,
-        Feature.TRUSTED_CONTACT_LIMIT,
-        Feature.FAMILY_ALERTS,
-    },
-    PLAN_FAMILY_PRO: {
-        Feature.EMAIL_BREACH_COUNT,
-        Feature.TRUSTED_CONTACT_LIMIT,
-        Feature.FAMILY_ALERTS,
-    },
 }
 
+# ── Per-plan limits ────────────────────────────────────────────────────────
+# None = unlimited; 0 = explicitly blocked (enforced at feature layer)
 
 PLAN_LIMITS: dict[str, dict[Limit, int | None]] = {
     TIER_FREE: {
-        Limit.TRUSTED_CONTACT_MAX: 1,
-        Limit.THREAT_DAILY: 3,
-        Limit.EMAIL_MONTHLY: 3,
-        Limit.PASSWORD_MONTHLY: 3,
-        Limit.QR_WEEKLY: 3,
+        Limit.TRUSTED_CONTACT_MAX: 0,
+        Limit.THREAT_DAILY: 1,
+        Limit.EMAIL_MONTHLY: 1,        # window: weekly (see plan_limits.py)
+        Limit.PASSWORD_MONTHLY: 1,     # window: weekly (see plan_limits.py)
+        Limit.QR_WEEKLY: 1,
         Limit.AI_IMAGE_LIFETIME: 1,
-        Limit.ANALYZE_DAILY_THREAT: 3,
-        Limit.ANALYZE_DAILY_EMAIL: 3,
-        Limit.ANALYZE_DAILY_PASSWORD: 3,
-        Limit.QR_WEEKLY_SCAN: 3,
-        Limit.QR_WEEKLY_REPORT: 3,
+        Limit.AI_EXPLAIN_DAILY: 0,     # blocked at Feature.AI_EXPLAIN gate
     },
     TIER_PRO: {
-        Limit.TRUSTED_CONTACT_MAX: 1,
+        Limit.TRUSTED_CONTACT_MAX: 3,
         Limit.THREAT_DAILY: None,
         Limit.EMAIL_MONTHLY: None,
         Limit.PASSWORD_MONTHLY: None,
         Limit.QR_WEEKLY: None,
         Limit.AI_IMAGE_LIFETIME: None,
-        Limit.ANALYZE_DAILY_THREAT: 100,
-        Limit.ANALYZE_DAILY_EMAIL: 20,
-        Limit.ANALYZE_DAILY_PASSWORD: 20,
-        Limit.QR_WEEKLY_SCAN: None,
-        Limit.QR_WEEKLY_REPORT: None,
+        Limit.AI_EXPLAIN_DAILY: 20,
     },
     TIER_ULTRA: {
-        Limit.TRUSTED_CONTACT_MAX: 1,
+        Limit.TRUSTED_CONTACT_MAX: 6,
         Limit.THREAT_DAILY: None,
         Limit.EMAIL_MONTHLY: None,
         Limit.PASSWORD_MONTHLY: None,
         Limit.QR_WEEKLY: None,
         Limit.AI_IMAGE_LIFETIME: None,
-        Limit.ANALYZE_DAILY_THREAT: 100,
-        Limit.ANALYZE_DAILY_EMAIL: 20,
-        Limit.ANALYZE_DAILY_PASSWORD: 20,
-        Limit.QR_WEEKLY_SCAN: None,
-        Limit.QR_WEEKLY_REPORT: None,
-    },
-    PLAN_FAMILY_BASIC: {
-        Limit.TRUSTED_CONTACT_MAX: 3,
-        Limit.THREAT_DAILY: 3,
-        Limit.EMAIL_MONTHLY: 3,
-        Limit.PASSWORD_MONTHLY: 3,
-        Limit.QR_WEEKLY: 3,
-        Limit.AI_IMAGE_LIFETIME: 1,
-        Limit.ANALYZE_DAILY_THREAT: 10,
-        Limit.ANALYZE_DAILY_EMAIL: 3,
-        Limit.ANALYZE_DAILY_PASSWORD: 3,
-        Limit.QR_WEEKLY_SCAN: 3,
-        Limit.QR_WEEKLY_REPORT: 3,
-    },
-    PLAN_FAMILY_PRO: {
-        Limit.TRUSTED_CONTACT_MAX: 6,
-        Limit.THREAT_DAILY: 3,
-        Limit.EMAIL_MONTHLY: 3,
-        Limit.PASSWORD_MONTHLY: 3,
-        Limit.QR_WEEKLY: 3,
-        Limit.AI_IMAGE_LIFETIME: 1,
-        Limit.ANALYZE_DAILY_THREAT: 10,
-        Limit.ANALYZE_DAILY_EMAIL: 3,
-        Limit.ANALYZE_DAILY_PASSWORD: 3,
-        Limit.QR_WEEKLY_SCAN: 3,
-        Limit.QR_WEEKLY_REPORT: 3,
+        Limit.AI_EXPLAIN_DAILY: None,
     },
 }
 
+# ── Global (non-plan-scoped) limits ────────────────────────────────────────
 
 GLOBAL_LIMITS: dict[Limit, int] = {
     Limit.EMAIL_MAX_LENGTH: 254,
@@ -187,6 +153,8 @@ GLOBAL_LIMITS: dict[Limit, int] = {
     Limit.BREACH_EMAIL_CACHE_TTL_SECONDS: 300,
 }
 
+
+# ── Helper functions ────────────────────────────────────────────────────────
 
 def normalize_plan(raw_plan: str | None) -> str:
     if not raw_plan:
@@ -227,16 +195,3 @@ def get_feature_limit(user: Any, feature: Feature | str) -> int | None:
     if resolved == Feature.TRUSTED_CONTACT_LIMIT:
         return get_plan_limit(user, Limit.TRUSTED_CONTACT_MAX)
     return None
-
-
-def get_analyze_daily_limit(user: Any, scan_type: str) -> int | None:
-    scan = scan_type.upper()
-    mapping = {
-        "THREAT": Limit.ANALYZE_DAILY_THREAT,
-        "EMAIL": Limit.ANALYZE_DAILY_EMAIL,
-        "PASSWORD": Limit.ANALYZE_DAILY_PASSWORD,
-    }
-    selected = mapping.get(scan)
-    if not selected:
-        return None
-    return get_plan_limit(user, selected)

@@ -6,12 +6,10 @@ from typing import List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.user import User
-from app.routes.auth import get_current_user
+from app.routes.scan_base import apply_scan_rate_limits, require_user
 from app.schemas.qr_secure_schemas import (
     QrAnalyzePayload,
     QrAnalyzeResponse,
@@ -20,7 +18,6 @@ from app.schemas.qr_secure_schemas import (
 )
 from app.services.qr_classifier import QrType, classify_payload
 from app.services.qr_normalizer import normalize_payload
-from app.services.qr_rate_limit import enforce_rate_limits
 from app.services.qr_reputation import get_or_create_reputation, increment_reported
 from app.services.qr_scoring import score_risk
 from app.services.qr_validators import (
@@ -55,7 +52,7 @@ def _external_blacklist_check(qr_hash: str, timeout_ms: int = 500) -> bool:
 def analyze_qr(
     payload: QrAnalyzePayload,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(require_user),
     db: Session = Depends(get_db, use_cache=False),
 ):
     correlation_id = _build_correlation_id()
@@ -67,7 +64,17 @@ def analyze_qr(
         payload_for_hash = meta["url"] if detected_type == QrType.URL else normalized
         qr_hash = hashlib.sha256(payload_for_hash.encode("utf-8")).hexdigest()
 
-        enforce_rate_limits(str(current_user.id), client_ip, qr_hash)
+        apply_scan_rate_limits(
+            current_user=current_user,
+            endpoint="/qr/analyze",
+            client_ip=client_ip,
+            user_namespace="scan:qr:user",
+            user_limit=20,
+            ip_namespace="scan:qr:ip",
+            ip_limit=60,
+            plan_limit_policy="plan_quota",
+            scan_type="qr",
+        )
 
         reasons: List[str] = []
         homograph = False
@@ -210,7 +217,7 @@ def analyze_qr(
 def report_qr(
     payload: QrReportPayload,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user=Depends(require_user),
     db: Session = Depends(get_db, use_cache=False),
 ):
     correlation_id = _build_correlation_id()
@@ -223,7 +230,17 @@ def report_qr(
         if not current_user.created_at or (time.time() - current_user.created_at.timestamp()) < 86400:
             raise HTTPException(status_code=403, detail="Account not eligible to report yet")
 
-        enforce_rate_limits(str(current_user.id), client_ip, qr_hash)
+        apply_scan_rate_limits(
+            current_user=current_user,
+            endpoint="/qr/report",
+            client_ip=client_ip,
+            user_namespace="scan:qr:report:user",
+            user_limit=10,
+            ip_namespace="scan:qr:report:ip",
+            ip_limit=30,
+            plan_limit_policy="plan_quota",
+            scan_type="qr",
+        )
 
         with db.begin():
             reputation = get_or_create_reputation(db, qr_hash)

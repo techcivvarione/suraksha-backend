@@ -57,8 +57,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from PIL import Image, ImageFilter, ImageStat
 from pydantic import BaseModel
 
+from app.db import get_db
+from app.dependencies.access import require_feature
+from app.core.features import Feature, TIER_ULTRA, normalize_plan
 from app.routes.scan_base import apply_scan_rate_limits, require_user
+from app.services.plan_limits import LimitType, enforce_limit
+from app.services.redis_store import allow_daily_limit
 from app.services.risk_mapper import derive_risk_level_from_score
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
 logger = logging.getLogger(__name__)
@@ -552,11 +558,14 @@ async def scan_image(
     file: UploadFile = File(...),
     request: Request = None,
     current_user=Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """Synchronous, lightweight image authenticity scan.
 
     Accepts PNG, JPEG, or WebP images up to 10 MB.
     Returns a complete risk assessment with no null fields.
+    FREE users: 1 lifetime scan (enforced via DB counter).
+    PRO/ULTRA: unlimited.
     """
     client_ip = request.client.host if request and request.client else "unknown"
 
@@ -573,6 +582,7 @@ async def scan_image(
     if len(image_bytes) > _MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="Image too large (max 10 MB)")
 
+    # Enforce per-plan rate limits; lifetime counter for FREE is below
     apply_scan_rate_limits(
         current_user=current_user,
         endpoint="/scan/image",
@@ -584,6 +594,9 @@ async def scan_image(
         plan_limit_policy="plan_quota",
         scan_type="image",
     )
+
+    # FREE: enforce 1-lifetime DB counter (PRO/ULTRA skipped inside enforce_limit)
+    enforce_limit(current_user, LimitType.AI_IMAGE_LIFETIME, db=db, endpoint="/scan/image")
 
     try:
         result = _analyze_image(image_bytes)
@@ -625,14 +638,28 @@ class ImageExplainRequest(BaseModel):
 @router.post("/image/explain")
 async def explain_image(
     body: ImageExplainRequest,
-    current_user=Depends(require_user),
+    request: Request,
+    current_user=Depends(require_feature(Feature.AI_EXPLAIN)),  # blocks FREE users (403 + upgrade payload)
 ):
     """LLM-powered plain-English explanation of an image scan result.
 
+    Requires AI_EXPLAIN feature (GO_PRO or GO_ULTRA).
+    PRO: 20 explain calls/day. ULTRA: unlimited.
     Accepts the key outputs from POST /scan/image and returns 2–3 plain-English
     sentences that explain the result to a non-technical user.
     Gracefully falls back to a deterministic template if the LLM call fails.
     """
+    client_ip = request.client.host or "unknown"
+    plan = normalize_plan(getattr(current_user, "plan", None))
+
+    # IP-level abuse guard (20/day per IP regardless of plan)
+    if not allow_daily_limit("scan:image:explain:ip", 20, client_ip):
+        raise HTTPException(status_code=429, detail="Too many explain requests from this network. Try again tomorrow.")
+
+    # PRO: 20/day per user; ULTRA: unlimited
+    if plan != TIER_ULTRA:
+        if not allow_daily_limit("scan:image:explain:user", 20, str(current_user.id)):
+            raise HTTPException(status_code=429, detail="Daily AI explain limit reached. Try again tomorrow.")
     try:
         import openai  # guarded import — keeps startup fast when unused
 

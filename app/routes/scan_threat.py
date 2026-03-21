@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.features import normalize_plan
 from app.db import get_db
-from app.routes.scan_base import generate_scan_id, raise_scan_error, require_user
+from app.routes.scan_base import apply_scan_rate_limits, generate_scan_id, raise_scan_error, require_user
 from app.schemas.scan_response import ScanResponse
 from app.schemas.scan_threat import ThreatScanRequest
 from app.services.alert_rate_limiter import enforce_alert_limits
@@ -33,6 +33,19 @@ def scan_threat(
         raise HTTPException(status_code=400, detail="Text required")
     if len(raw_text) > 2000:
         raise HTTPException(status_code=400, detail="Text too long")
+
+    client_ip = request.client.host or "unknown"
+    apply_scan_rate_limits(
+        current_user=current_user,
+        endpoint="/scan/threat",
+        client_ip=client_ip,
+        user_namespace="scan:threat:user",
+        user_limit=100,
+        ip_namespace="scan:threat:ip",
+        ip_limit=300,
+        plan_limit_policy="plan_quota",
+        scan_type="threat",
+    )
 
     scan_id = generate_scan_id()
     plan = normalize_plan(getattr(current_user, "plan", None))
@@ -120,7 +133,7 @@ def scan_threat(
 
     if int(response.risk_score) >= 70:
         try:
-            enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None)
+            enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None, plan=plan)
             event = create_alert_event(
                 db=db,
                 user_id=current_user.id,

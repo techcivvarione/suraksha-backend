@@ -224,6 +224,7 @@ from app.routes.billing import router as billing_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.admin import router as admin_router
 from app.routes.search import router as search_router
+from app.routes.user_quota import router as user_quota_router
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -256,6 +257,7 @@ app.include_router(billing_router)
 app.include_router(webhooks_router)
 app.include_router(admin_router)
 app.include_router(search_router)
+app.include_router(user_quota_router)
 
 
 @app.get("/health")

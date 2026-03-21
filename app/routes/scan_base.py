@@ -127,7 +127,9 @@ def apply_scan_rate_limits(
 
     if plan_limit_policy == "plan_quota":
         resolved_scan_type = scan_type or endpoint.strip("/").replace("/", "_")
-        if is_unlimited_scan_plan(current_user):
+
+        # PRO and ULTRA are fully unlimited — return immediately
+        if plan in {TIER_PRO, TIER_ULTRA}:
             _log_scan_limit_check(
                 user_id=user_id,
                 scan_type=resolved_scan_type,
@@ -139,12 +141,25 @@ def apply_scan_rate_limits(
             )
             return
 
-        if plan == TIER_PRO:
-            limit = 3
-            period = "day"
-        else:
-            limit = 1
-            period = "month"
+        # FREE: per-scan-type windows
+        scan_key = resolved_scan_type.lower()
+
+        # image lifetime is enforced separately via enforce_limit in the route
+        if scan_key == "image":
+            return
+
+        _FREE_PERIOD_CONFIG: dict[str, tuple[str, int]] = {
+            "threat":   ("day",  1),
+            "email":    ("week", 1),
+            "password": ("week", 1),
+            "qr":       ("week", 1),
+        }
+        pc = _FREE_PERIOD_CONFIG.get(scan_key)
+        if pc is None:
+            # Unknown scan type — allow through
+            return
+
+        period, limit = pc
 
         try:
             result = check_scan_limit(user_id, resolved_scan_type, limit, period)
@@ -161,8 +176,7 @@ def apply_scan_rate_limits(
             endpoint=endpoint,
         )
         if not result.allowed:
-            message = "Free scan limit reached." if plan == TIER_FREE else "Daily scan limit reached."
-            raise_scan_error(429, "SCAN_LIMIT_REACHED", message)
+            raise_scan_error(429, "SCAN_LIMIT_REACHED", "Free scan limit reached. Upgrade to continue.")
         return
 
     if plan in {TIER_PRO, TIER_ULTRA}:
