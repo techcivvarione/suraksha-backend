@@ -12,6 +12,7 @@ from app.schemas.scan_threat import ThreatScanRequest
 from app.services.alert_rate_limiter import enforce_alert_limits
 from app.services.threat.threat_analyzer import analyze_threat
 from app.services.response_builder import build_scan_response
+from app.services.risk_mapper import derive_risk_level_from_score
 from app.services.scan_logger import log_scan_event
 from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
 from app.enums.scan_type import ScanType
@@ -51,7 +52,7 @@ def scan_threat(
         build_scan_response(
             analysis_type=ScanType.THREAT.value,
             risk_score=result.get("risk_score"),
-            risk_level=result.get("risk_level") or "UNKNOWN",
+            risk_level=result.get("risk_level") or derive_risk_level_from_score(result.get("risk_score") or 0),
             reasons=result.get("reasons"),
             recommendation=result.get("recommendation"),
             confidence=float(result.get("confidence") or 0.0),
@@ -98,7 +99,7 @@ def scan_threat(
             "id": scan_id,
             "user_id": str(current_user.id),
             "input_text": raw_text[:1000],
-            "risk": str(response.risk_level or "UNKNOWN").lower(),
+            "risk": str(response.risk_level or derive_risk_level_from_score(int(response.risk_score or 0))).lower(),
             "score": int(response.risk_score),
             "reasons": json.dumps(response.reasons),
             "scan_type": ScanType.THREAT.value,

@@ -39,8 +39,8 @@ def analyze_video_frames(path: str, fast_mode: bool = False) -> FrameAnalysisRes
             texture=DetectionLayer(0.20, []),
         )
 
-    max_frames = 18 if fast_mode else 30
-    frame_stride = 10 if fast_mode else 5
+    max_frames = 7 if fast_mode else 18
+    frame_stride = 15 if fast_mode else 10
     sampled = 0
     previous_gray = None
     boundary_scores: list[float] = []

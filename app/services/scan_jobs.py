@@ -1,26 +1,22 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
+from queue import Empty as _QueueEmpty
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import engine
-from app.enums.scan_type import ScanType
 from app.models.scan_job import ScanJob
 from app.models.user import User
 from app.services.alert_rate_limiter import AlertRateLimiterError, enforce_alert_limits
-from app.services.ai_explainer import generate_ai_explanation
-from app.services.ocr_service import OCRException, extract_text_from_image
-from app.services.reality.image_ai_detector import ImageAIDetector
-from app.services.reality.video_deepfake_detector import VideoDeepfakeDetector
-from app.services.reality.voice_deepfake_detector import VoiceDeepfakeDetector
 from app.services.scan_logger import log_scan_event
 from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
 from app.services.security_plan_limits import allows_realtime_alerts
@@ -28,23 +24,63 @@ from app.services.storage_service import delete_file, download_file
 
 logger = logging.getLogger(__name__)
 
-_image_detector = ImageAIDetector()
-_video_detector = VideoDeepfakeDetector()
-_audio_detector = VoiceDeepfakeDetector()
+# ---------------------------------------------------------------------------
+# Timing and size limits
+# ---------------------------------------------------------------------------
+# Wall-clock budget for the child detection process.  Keep this low enough
+# that the job is always marked "failed" BEFORE the frontend's polling window
+# expires (see POLL_MAX_ATTEMPTS / POLL_INTERVAL_MS in ScanRepositoryImpl.kt).
+#
+# Budget breakdown (worst case):
+#   worker pick-up delay       ≤ 2 s
+#   file download              ≤ 2 s
+#   subprocess spawn (spawn)   ≤ 2 s
+#   detection timeout below  → 15 s
+#   DB commit                  ≤ 1 s
+#   ─────────────────────────────────
+#   total                      ≤ 22 s   < frontend 25 s window (10 × 2.5 s)
+_DETECTION_TIMEOUT_SECONDS = 15
+
+# Reject files larger than this before even writing to disk.  The route layer
+# already enforces 10 MB at upload time; this is a defence-in-depth guard.
+_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Grace period after SIGTERM before we escalate to SIGKILL.
+_KILL_GRACE_SECONDS = 3
+
+# Fields that must be present in every result dict returned by the child
+# process.  If any are absent the payload is treated as a failure so the
+# frontend never receives a partially-populated result card.
+_REQUIRED_RESULT_FIELDS: frozenset[str] = frozenset({
+    "risk_score",
+    "risk_level",
+    "confidence",
+    "reasons",
+    "recommendation",
+})
 
 
 def _scan_failure_payload() -> dict:
+    """Return a complete, UI-safe result for any job that could not be processed.
+
+    Every field that the frontend ScanMapper / ScanJobResult parser reads must be
+    present so the app never renders null values or "UNKNOWN" risk levels.
+    """
     return {
         "status": "failed",
         "error_code": "SCAN_FAILED",
-        "message": "Scan failed",
+        "message": "Scan could not complete",
+        "risk_score": 0,
+        "score": 0,
+        "risk_level": "LOW",        # score 0 → LOW; never emit "UNKNOWN"
+        "confidence": 0.5,          # conservative — we genuinely don't know
+        "ai_probability": 0.0,
+        "reasons": ["Scan could not complete in time"],
+        "signals": ["Scan could not complete in time"],
+        "recommendation": "Try again with a smaller or different file",
+        "ai_explanation": None,
+        "ocr_text_preview": None,
     }
-
-_SCAN_TYPE_TO_ANALYSIS = {
-    "image": ScanType.REALITY_IMAGE.value,
-    "video": ScanType.REALITY_VIDEO.value,
-    "audio": ScanType.REALITY_AUDIO.value,
-}
 
 _SCAN_TYPE_TO_ENDPOINT = {
     "image": "/scan/reality/image",
@@ -116,15 +152,47 @@ def claim_next_pending_job(db: Session) -> ScanJob | None:
 
 
 def process_scan_job(db: Session, job: ScanJob) -> None:
+    started_at = time.monotonic()
     logger.info(
         "scan_job_start",
         extra={"job_id": str(job.id), "scan_type": job.scan_type, "user_id": str(job.user_id)},
     )
     temp_path = None
+    # Tracks whether "completed" has been successfully committed to the DB.
+    # Guarded by the finally-style pattern below so that a failure in
+    # post-processing (alerts, scan-event logging) never overwrites an
+    # already-committed "completed" row with "failed".
+    _wrote_final_status = False
     try:
         media_bytes = download_file(job.file_path)
+
+        # Reject files that are too large before spending time on analysis.
+        if len(media_bytes) > _MAX_FILE_BYTES:
+            raise ValueError(
+                f"File too large: {len(media_bytes):,} bytes "
+                f"(limit {_MAX_FILE_BYTES // (1024 * 1024)} MB)"
+            )
+
         temp_path = _write_temp_media(job, media_bytes)
-        result = _run_detection(job, temp_path)
+
+        # Spawn a child process for detection.  The process can be hard-killed
+        # on timeout (unlike a thread).  TimeoutError is re-raised and caught
+        # by the outer except block which marks the job as "failed".
+        try:
+            result = _run_detection_with_timeout(job, temp_path)
+        except TimeoutError:
+            elapsed = time.monotonic() - started_at
+            logger.warning(
+                "scan_job_timeout",
+                extra={
+                    "job_id": str(job.id),
+                    "scan_type": job.scan_type,
+                    "elapsed_seconds": round(elapsed, 2),
+                    "timeout_seconds": _DETECTION_TIMEOUT_SECONDS,
+                },
+            )
+            raise  # escalate to the outer except → marks job as failed
+
         payload = json.dumps(result)
 
         with db.begin():
@@ -132,7 +200,13 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
             job.result_json = payload
             db.add(job)
             _insert_scan_history(db, job=job, result=result)
+        # Only set the flag AFTER the transaction commits successfully.
+        # If _insert_scan_history() or the commit itself raises, the
+        # transaction rolls back and _wrote_final_status stays False,
+        # so the except block will correctly write "failed".
+        _wrote_final_status = True
 
+        elapsed = time.monotonic() - started_at
         logger.info(
             "scan_job_complete",
             extra={
@@ -141,6 +215,7 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
                 "risk_score": result.get("risk_score"),
                 "risk_level": result.get("risk_level"),
                 "provider_used": result.get("provider_used"),
+                "elapsed_seconds": round(elapsed, 2),
             },
         )
 
@@ -156,14 +231,43 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
             provider_used=result.get("provider_used"),
         )
     except Exception as exc:
-        logger.exception(
-            "scan_job_failed",
-            extra={"job_id": str(job.id), "scan_type": job.scan_type, "error": str(exc)},
-        )
-        with db.begin():
-            job.status = "failed"
-            job.result_json = json.dumps(_scan_failure_payload())
-            db.add(job)
+        elapsed = time.monotonic() - started_at
+        if _wrote_final_status:
+            # "completed" was already committed.  A post-processing error
+            # (alerts, scan-event log, etc.) must NOT overwrite it with
+            # "failed" — the client already has the correct result.
+            logger.exception(
+                "scan_job_post_processing_failed",
+                extra={
+                    "job_id": str(job.id),
+                    "scan_type": job.scan_type,
+                    "error": str(exc),
+                    "elapsed_seconds": round(elapsed, 2),
+                },
+            )
+        else:
+            # Detection or pre-processing failed; guarantee "failed" in DB.
+            # The nested try/except ensures a DB outage here cannot leave the
+            # job stuck in "processing" indefinitely.
+            logger.exception(
+                "scan_job_failed",
+                extra={
+                    "job_id": str(job.id),
+                    "scan_type": job.scan_type,
+                    "error": str(exc),
+                    "elapsed_seconds": round(elapsed, 2),
+                },
+            )
+            try:
+                with db.begin():
+                    job.status = "failed"
+                    job.result_json = json.dumps(_scan_failure_payload())
+                    db.add(job)
+            except Exception:
+                logger.exception(
+                    "scan_job_status_update_failed",
+                    extra={"job_id": str(job.id)},
+                )
     finally:
         try:
             delete_file(job.file_path)
@@ -176,76 +280,161 @@ def process_scan_job(db: Session, job: ScanJob) -> None:
                 logger.warning("scan_job_file_cleanup_failed", extra={"job_id": str(job.id), "file_path": temp_path})
 
 
-def _run_detection(job: ScanJob, file_path: str) -> dict:
-    mime_type = _infer_mime_type(file_path, job.scan_type)
-    detector = _detector_for(job.scan_type)
-    detection = asyncio.run(detector.detect(file_path, mime_type, filename=Path(file_path).name, fast_mode=False))
+def _run_detection_with_timeout(job: ScanJob, file_path: str) -> dict:
+    """Spawn a child process to run detection; hard-kill it if it exceeds the timeout.
 
-    probability = float(detection.get("probability", 0.0))
-    signals = list(detection.get("signals") or [_default_signal(job.scan_type, probability)])
-    explanation = _generate_explanation(job.scan_type, detection.get("risk_level"), detection.get("risk_score"), signals)
+    Why a process instead of a thread
+    ----------------------------------
+    Python threads cannot be forcefully stopped from outside.  A thread running
+    cv2 / librosa / OpenAI can block indefinitely even after
+    ``future.cancel()`` or ``TimeoutError`` is raised by the caller.  This
+    means a hung thread-based approach leaves the job stuck in "processing"
+    state despite the timeout guard appearing to fire.
 
-    result = {
-        "scan_id": str(job.id),
-        "analysis_type": _SCAN_TYPE_TO_ANALYSIS[job.scan_type],
-        "risk_score": int(detection.get("risk_score") or 0),
-        "risk_level": detection.get("risk_level") or "MEDIUM",
-        "confidence": probability,
-        "reasons": signals,
-        "recommendation": _recommendation_for(job.scan_type, detection.get("risk_level") or "MEDIUM"),
-        "ai_probability": probability,
-        "risk": (detection.get("risk_level") or "MEDIUM"),
-        "signals": signals,
-        "provider_used": detection.get("provider_used", "internal-hybrid"),
-        "ocr_text_preview": _extract_ocr_preview(job.scan_type, file_path),
-        "ai_explanation": explanation,
-    }
-    return result
+    An OS process can be terminated with SIGTERM → SIGKILL, which guarantees:
+    * No CPU/memory leak after timeout
+    * No zombie processes (we call ``proc.join()`` after every exit path)
+    * The DB is updated to "failed" exactly once, within the timeout budget
 
+    Spawn vs fork
+    -------------
+    We use the ``spawn`` start method explicitly so the child starts with a
+    clean Python interpreter.  This avoids ``fork``-induced deadlocks that can
+    occur when forking from a multithreaded process (the worker daemon thread
+    that calls this function runs alongside SQLAlchemy pool threads, uvicorn
+    worker threads, etc.).
+    """
+    from app.workers.detection_process import run as _detection_run
 
-def _detector_for(scan_type: str):
-    if scan_type == "image":
-        return _image_detector
-    if scan_type == "video":
-        return _video_detector
-    if scan_type == "audio":
-        return _audio_detector
-    raise ValueError(f"Unsupported scan type: {scan_type}")
+    ctx = multiprocessing.get_context("spawn")
+    result_queue: multiprocessing.Queue = ctx.Queue()
 
+    proc = ctx.Process(
+        target=_detection_run,
+        args=(str(job.id), job.scan_type, file_path, result_queue),
+        name=f"scan-detect-{job.id}",
+        daemon=True,
+    )
 
-def _infer_mime_type(file_path: str, scan_type: str) -> str:
-    extension = Path(file_path).suffix.lower()
-    mime_type = _SCAN_TYPE_TO_MIME.get(scan_type, {}).get(extension)
-    if not mime_type:
-        raise ValueError(f"Unsupported file extension for {scan_type}: {extension}")
-    return mime_type
+    detect_start = time.monotonic()
+    proc.start()
+    proc.join(timeout=_DETECTION_TIMEOUT_SECONDS)
+    detect_elapsed = time.monotonic() - detect_start
 
-
-def _extract_ocr_preview(scan_type: str, file_path: str) -> str | None:
-    if scan_type != "image":
-        return None
-    try:
-        with open(file_path, "rb") as handle:
-            extracted = extract_text_from_image(handle.read()).strip()
-        return extracted[:300] if extracted else None
-    except OCRException:
-        return None
-    except Exception:
-        logger.exception("scan_job_ocr_failed", extra={"file_path": file_path})
-        return None
-
-
-def _generate_explanation(scan_type: str, risk_level: str | None, risk_score: int | None, reasons: list[str]) -> str | None:
-    try:
-        return generate_ai_explanation(
-            scan_type=_SCAN_TYPE_TO_ANALYSIS[scan_type],
-            risk=risk_level or "MEDIUM",
-            score=int(risk_score or 0),
-            reasons=reasons,
+    if proc.is_alive():
+        # ----------------------------------------------------------------
+        # Hard kill: SIGTERM first, then SIGKILL if process doesn't stop.
+        #
+        # Capture pid NOW — proc.close() below invalidates all proc attributes
+        # (CPython raises ValueError: process object is closed on access).
+        # ----------------------------------------------------------------
+        _timeout_pid = proc.pid
+        logger.warning(
+            "scan_detect_process_timeout_kill",
+            extra={
+                "job_id": str(job.id),
+                "scan_type": job.scan_type,
+                "elapsed_seconds": round(detect_elapsed, 2),
+                "timeout_seconds": _DETECTION_TIMEOUT_SECONDS,
+                "pid": _timeout_pid,
+            },
         )
-    except Exception:
-        logger.exception("scan_job_ai_explanation_failed", extra={"scan_type": scan_type})
-        return None
+        proc.terminate()
+        proc.join(_KILL_GRACE_SECONDS)
+
+        if proc.is_alive():
+            logger.warning(
+                "scan_detect_process_force_kill",
+                extra={"job_id": str(job.id), "pid": _timeout_pid},
+            )
+            proc.kill()
+            proc.join(1)
+
+        # Reap zombie if the process has now exited; if it somehow survived
+        # SIGKILL (not possible on Linux/Mac, extremely rare on Windows)
+        # we skip close() and let the daemon flag handle cleanup on exit.
+        if not proc.is_alive():
+            proc.close()
+
+        raise TimeoutError(
+            f"Detection process killed after {_DETECTION_TIMEOUT_SECONDS}s "
+            f"(pid={_timeout_pid})"
+        )
+
+    # ----------------------------------------------------------------
+    # Process exited within the timeout — classify exit and read result.
+    #
+    # IMPORTANT: capture pid/exitcode BEFORE proc.close().
+    # CPython's Process.close() sets an internal _closed flag; every
+    # subsequent property access calls _check_closed() which raises
+    # ValueError: process object is closed.
+    # ----------------------------------------------------------------
+    _pid = proc.pid
+    _exitcode = proc.exitcode
+    exit_outcome = "normal" if _exitcode == 0 else "crash"
+    logger.info(
+        "scan_detect_process_exited",
+        extra={
+            "job_id": str(job.id),
+            "scan_type": job.scan_type,
+            "pid": _pid,
+            "exitcode": _exitcode,
+            "exit_outcome": exit_outcome,          # "normal" | "crash"
+            "elapsed_seconds": round(detect_elapsed, 2),
+        },
+    )
+    proc.close()  # release OS resources; do NOT access proc attributes after this
+
+    if _exitcode != 0:
+        # Non-zero exit: process crashed (OOM, segfault, unhandled C-level
+        # error).  detection_process.run() is supposed to catch everything and
+        # push an ("error", …) tuple, but if the crash happened before that
+        # (e.g. during import), the queue will be empty and the exit code is
+        # our only signal.
+        raise RuntimeError(
+            f"Detection process crashed with exit code {_exitcode} (pid={_pid})"
+        )
+
+    # ----------------------------------------------------------------
+    # Read result from queue.
+    #
+    # WHY get(timeout=2) instead of get_nowait():
+    # multiprocessing.Queue uses an internal feeder thread to move bytes
+    # from the child's put() call through the OS pipe to the parent's
+    # in-memory buffer.  After proc.join() returns the bytes are in the
+    # pipe but may not yet have been moved into the parent's buffer.
+    # get_nowait() fires before that transfer completes on loaded systems.
+    # get(timeout=2) gives the reader thread a 2-second window — well
+    # within the budget since the child has already exited.
+    #
+    # NOTE: Queue.empty() is explicitly documented as unreliable for
+    # multiprocessing queues (the docs say "Because of multithreading/
+    # multiprocessing semantics, this is not reliable") and is NOT used.
+    # ----------------------------------------------------------------
+    try:
+        tag, payload = result_queue.get(timeout=2)
+    except _QueueEmpty:
+        raise RuntimeError(
+            f"Detection process (pid={_pid}, exitcode={_exitcode}) "
+            "exited cleanly but produced no result in the queue"
+        )
+
+    if tag == "error":
+        raise RuntimeError(f"Detection failed inside child process: {payload}")
+
+    # ----------------------------------------------------------------
+    # Validate that the payload contains every field the frontend needs.
+    # A missing field means detection_process.run() produced an incomplete
+    # result — treat this as a failure rather than returning a half-empty
+    # result card to the user.
+    # ----------------------------------------------------------------
+    missing = _REQUIRED_RESULT_FIELDS - payload.keys()
+    if missing:
+        raise RuntimeError(
+            f"Detection result is missing required fields: {sorted(missing)}"
+        )
+
+    return payload  # complete result dict built by detection_process.run()
 
 
 def _insert_scan_history(db: Session, *, job: ScanJob, result: dict) -> None:
@@ -284,26 +473,6 @@ def _insert_scan_history(db: Session, *, job: ScanJob, result: dict) -> None:
             "scan_type": result["analysis_type"],
         },
     )
-
-
-def _recommendation_for(scan_type: str, risk_level: str) -> str:
-    if scan_type == "image":
-        return "Treat with caution; verify source." if risk_level != "LOW" else "No strong manipulation signs detected."
-    if scan_type == "video":
-        return (
-            "Do not trust this video without independent verification."
-            if risk_level != "LOW"
-            else "No strong deepfake indicators detected."
-        )
-    return "Do not trust this audio without verification." if risk_level != "LOW" else "No strong synthetic indicators detected."
-
-
-def _default_signal(scan_type: str, probability: float) -> str:
-    if scan_type == "image":
-        return f"Synthetic probability {probability:.2f}"
-    if scan_type == "video":
-        return f"Deepfake probability {probability:.2f}"
-    return f"Voice synthesis probability {probability:.2f}"
 
 
 def _file_size(path: str) -> int | None:

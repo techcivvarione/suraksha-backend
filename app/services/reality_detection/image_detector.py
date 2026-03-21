@@ -16,7 +16,7 @@ class ImageDetector:
     def analyze(self, path: str, mime_type: str, *, fast_mode: bool = False) -> DetectionOutcome:
         with Image.open(path) as image:
             working = image.copy()
-        working.thumbnail((768, 768) if fast_mode else (1024, 1024))
+        working.thumbnail((512, 512) if fast_mode else (768, 768))
 
         layers = {
             "metadata": analyze_image_metadata(path),
