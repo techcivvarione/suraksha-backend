@@ -52,6 +52,7 @@ import hashlib
 import io
 import logging
 import math
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from PIL import Image, ImageFilter, ImageStat
@@ -62,7 +63,7 @@ from app.dependencies.access import require_feature
 from app.core.features import Feature, TIER_ULTRA, normalize_plan
 from app.routes.scan_base import apply_scan_rate_limits, require_user
 from app.services.plan_limits import LimitType, enforce_limit
-from app.services.redis_store import allow_daily_limit
+from app.services.redis_store import allow_daily_limit, get_redis
 from app.services.risk_mapper import derive_risk_level_from_score
 from sqlalchemy.orm import Session
 
@@ -629,10 +630,168 @@ async def scan_image(
 # /scan/image/explain — LLM-powered plain-English explanation
 # ---------------------------------------------------------------------------
 
+_EXPLAIN_CACHE_TTL_SECONDS: int = 7 * 24 * 60 * 60  # 7 days
+
+# ── System prompt ─────────────────────────────────────────────────────────────
+# Tone + vocabulary rules are enforced here at the system level so they hold
+# regardless of what the user prompt says.
+_EXPLAIN_SYSTEM = (
+    "You are a warm, helpful friend explaining things to people in India who are not good with technology. "
+    "You just checked a photo for them and you are telling them what you found. "
+    "Speak like a trusted neighbour — friendly, direct, and easy to understand. "
+    "Never sound like a computer report or a formal letter. "
+    "Use ONLY everyday words a 12-year-old would understand. "
+    # ── Hard vocabulary ban ───────────────────────────────────────────────────
+    "BANNED words — never use these: metadata, entropy, compression, artifact, heuristic, anomaly, "
+    "algorithm, pixel, exif, JPEG, synthesis, forensic, luminance, coefficient, variance, "
+    "distribution, spectrum, histogram, indicators, signals, analysis, detection, generated, "
+    "'AI generation', pattern, texture, benchmark, threshold, correlation. "
+    # ── Preferred vocabulary ──────────────────────────────────────────────────
+    "INSTEAD use natural phrases like: 'looks real', 'looks fake', 'made by a computer', "
+    "'not from a real camera', 'nothing unusual', 'something feels off', 'we noticed', 'seems real'. "
+    # ── Tone rules based on score ─────────────────────────────────────────────
+    "TONE RULES — the risk score is given in the user message, follow these exactly: "
+    "  Score 0–30  → warm and reassuring. Start positively, put the person at ease. "
+    "  Score 31–60 → gently cautious. Note something seems slightly unusual — calm but alert. "
+    "  Score 61–100 → clear direct warning. Be honest that the photo looks fake, without being scary. "
+    # ── Structure ─────────────────────────────────────────────────────────────
+    "Write 2–3 short sentences only — no more. One plain paragraph. No bullet points or numbers. "
+    "VARY your opening every time — never start the same way twice. "
+    "Do NOT always start with 'This image' or 'This photo'. "
+    # ── Anti-generic phrases ──────────────────────────────────────────────────
+    "BANNED phrases: 'this is safe for now', 'exercise caution', 'for your information', "
+    "'it is advisable', 'please note', 'based on our analysis', 'it appears that', "
+    "'I would recommend', 'you should consider'. "
+    "Be specific to the actual evidence — mention what was actually noticed."
+)
+
+
 class ImageExplainRequest(BaseModel):
-    summary: str
-    highlights: list[str]
-    risk_score: int
+    risk_level: str           # "LOW" | "MEDIUM" | "HIGH"
+    risk_score: int           # 0–100
+    highlights: list[str]     # human-readable detection reasons from /scan/image
+    recommendation: str       # action text from /scan/image
+    # kept for backwards-compat; not used in the new prompt
+    summary: str | None = None
+
+
+def _explain_cache_key(risk_level: str, risk_score: int, highlights: list[str]) -> str:
+    """Stable SHA-256 cache key — same scan data always maps to the same key."""
+    # Sort highlights so minor ordering differences don't break cache hits.
+    h_norm = "|".join(sorted(h.strip().lower() for h in highlights[:5]))
+    raw = f"v4|{risk_level.upper()}|{risk_score}|{h_norm}"
+    return f"explain:image:{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+
+
+def _clean_highlights(highlights: list[str]) -> list[str]:
+    """Return only human-readable highlights — drop raw ALL_CAPS signal codes."""
+    return [h for h in highlights if not re.match(r'^[A-Z0-9_]+$', h.strip()) and len(h.strip()) > 15]
+
+
+# ── Opening-phrase pools for the fallback ────────────────────────────────────
+# Four variants per tone level — selection is deterministic (driven by the
+# first highlight text) so the same scan always returns the same variant,
+# but different scans get different openings.
+
+_FALLBACK_OPENERS: dict[str, list[str]] = {
+    "LOW": [
+        "This photo looks completely genuine to us.",
+        "Nothing feels off about this image — it looks real.",
+        "We had a close look and everything seems fine here.",
+        "This looks like a normal photo taken with a real camera.",
+    ],
+    "MEDIUM": [
+        "Something about this photo feels a little unusual.",
+        "We are not fully sure about this one.",
+        "A few things here look a bit odd to us.",
+        "We noticed something slightly unusual about this photo.",
+    ],
+    "HIGH": [
+        "This photo does not look real to us.",
+        "We are quite sure this image was made by a computer, not a real camera.",
+        "Something is clearly not right about this photo.",
+        "This image has some clear signs that it was not taken with a real camera.",
+    ],
+}
+
+
+def _fallback_seed(risk_level: str, highlights: list[str]) -> int:
+    """Deterministic 0–3 seed so the same scan always picks the same opener."""
+    seed_str = risk_level.upper() + (highlights[0][:30] if highlights else "empty")
+    return int(hashlib.sha256(seed_str.encode()).hexdigest()[:4], 16)
+
+
+def _build_prompt(
+    risk_level: str,
+    risk_score: int,
+    highlights: list[str],
+    recommendation: str,
+) -> str:
+    """Result-specific user prompt — all four scan fields injected, with tone instruction."""
+    clean = _clean_highlights(highlights)[:4]
+    findings = "; ".join(clean) if clean else "no single clear sign was found"
+
+    verdict_hint = {
+        "HIGH":   f"looks very likely fake — probably made by a computer (score: {risk_score}/100)",
+        "MEDIUM": f"has some unusual things — hard to say for sure (score: {risk_score}/100)",
+        "LOW":    f"looks like a genuine photo (score: {risk_score}/100)",
+    }.get(risk_level.upper(), f"was checked (score: {risk_score}/100)")
+
+    if risk_score <= 30:
+        tone = "Tone: warm and reassuring. Start positively and put the person at ease."
+    elif risk_score <= 60:
+        tone = "Tone: gently cautious. Note something seems slightly unusual — keep them calm but alert."
+    else:
+        tone = "Tone: clear direct warning. Be honest that this photo looks fake without being scary."
+
+    return (
+        f"Photo check result: this photo {verdict_hint}. "
+        f"What we noticed: {findings}. "
+        f"What to do: {recommendation}. "
+        f"{tone} "
+        "Write 2–3 short sentences. "
+        "Mention what was actually noticed — be specific, not generic. "
+        "Vary your opening — do not start with 'This image' or repeat predictable phrases."
+    )
+
+
+def _build_fallback(
+    risk_level: str,
+    risk_score: int,
+    highlights: list[str],
+    recommendation: str,
+) -> str:
+    """Deterministic, result-specific fallback.
+
+    Uses the first human-readable highlight as the 'reason' sentence so two
+    different scans produce different text even without an LLM call.
+    Opening line is chosen from a pool keyed by risk level + highlights hash.
+    """
+    clean = _clean_highlights(highlights)
+    first_reason = clean[0].rstrip(". ") if clean else None
+    rec = recommendation.strip().rstrip(".")
+
+    rl = risk_level.upper() if risk_level.upper() in _FALLBACK_OPENERS else "MEDIUM"
+    idx = _fallback_seed(risk_level, highlights) % len(_FALLBACK_OPENERS[rl])
+    opener = _FALLBACK_OPENERS[rl][idx]
+
+    # Reason clause — uses actual highlight when available
+    if first_reason:
+        why = f" We noticed that {first_reason.lower()}."
+    elif rl == "HIGH":
+        why = f" The score is {risk_score} out of 100, which is very high."
+    elif rl == "MEDIUM":
+        why = f" The score is {risk_score} out of 100, which means something may not be right."
+    else:
+        why = f" The score is only {risk_score} out of 100, which means it looks real."
+
+    # Action clause — reassuring for LOW, recommendation for others
+    if rl == "LOW":
+        action = " There is nothing to worry about — this photo seems genuine."
+    else:
+        action = f" {rec}."
+
+    return (opener + why + action).strip()
 
 
 @router.post("/image/explain")
@@ -645,93 +804,72 @@ async def explain_image(
 
     Requires AI_EXPLAIN feature (GO_PRO or GO_ULTRA).
     PRO: 20 explain calls/day. ULTRA: unlimited.
-    Accepts the key outputs from POST /scan/image and returns 2–3 plain-English
-    sentences that explain the result to a non-technical user.
-    Gracefully falls back to a deterministic template if the LLM call fails.
+
+    Accepts the structured outputs from POST /scan/image and returns 3 plain-English
+    sentences specific to THIS scan result. Results are cached in Redis (7 days) so
+    the same scan never triggers a second OpenAI call.
     """
     client_ip = request.client.host or "unknown"
     plan = normalize_plan(getattr(current_user, "plan", None))
 
-    # IP-level abuse guard (20/day per IP regardless of plan)
+    # IP-level abuse guard — 20 unique explain calls/day per IP
     if not allow_daily_limit("scan:image:explain:ip", 20, client_ip):
-        raise HTTPException(status_code=429, detail="Too many explain requests from this network. Try again tomorrow.")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many explain requests from this network. Try again tomorrow.",
+        )
 
     # PRO: 20/day per user; ULTRA: unlimited
     if plan != TIER_ULTRA:
         if not allow_daily_limit("scan:image:explain:user", 20, str(current_user.id)):
-            raise HTTPException(status_code=429, detail="Daily AI explain limit reached. Try again tomorrow.")
+            raise HTTPException(
+                status_code=429,
+                detail="Daily AI explain limit reached. Try again tomorrow.",
+            )
 
-    # ── Simple-language system prompt ─────────────────────────────────────────
-    _SYSTEM = (
-        "You are a cybersecurity assistant for everyday users, including people in rural India. "
-        "Explain image scan results in very simple language — like talking to a family member "
-        "who does not know anything about technology. "
-        "Never use technical words. Banned: metadata, entropy, compression, artifact, heuristic, "
-        "anomaly, algorithm, pixel, exif, JPEG, synthesis. "
-        "Write exactly 3 short sentences: "
-        "1) Is this image real or fake — clear verdict. "
-        "2) One simple reason why. "
-        "3) What the person should do. "
-        "No bullet points, no headings. Plain paragraph."
-    )
+    # ── Redis cache check ──────────────────────────────────────────────────────
+    cache_key = _explain_cache_key(body.risk_level, body.risk_score, body.highlights)
+    try:
+        cached = get_redis().get(cache_key)
+        if cached:
+            logger.info("explain_image_cache_hit", extra={"cache_key": cache_key})
+            return {"explanation": cached}
+    except Exception:
+        pass  # Redis unavailable — proceed to generate
+
+    # ── Generate via GPT-4o-mini ───────────────────────────────────────────────
+    prompt = _build_prompt(body.risk_level, body.risk_score, body.highlights, body.recommendation)
 
     try:
         import openai  # guarded import — keeps startup fast when unused
 
-        client = openai.OpenAI()  # reads OPENAI_API_KEY from environment
-        # Use at most 3 highlights, strip technical signal codes embedded in brackets
-        highlights_clean = [
-            h for h in body.highlights[:3]
-            if not h.isupper()  # skip raw signal codes like "AI_SOFTWARE_TAG"
-        ]
-        signals_text = "; ".join(highlights_clean) if highlights_clean else "no obvious problems found"
-
-        if body.risk_score >= 61:
-            verdict_hint = "This image is very likely fake or AI-generated."
-        elif body.risk_score >= 31:
-            verdict_hint = "This image may have been edited or created by a computer."
-        else:
-            verdict_hint = "This image looks like a real photograph."
-
-        prompt = (
-            f"An image was scanned. Result: {verdict_hint} "
-            f"Risk score: {body.risk_score} out of 100. "
-            f"What we found: {signals_text}. "
-            "In 3 short sentences, explain this to a person who does not know technology: "
-            "is it real or fake, why you think so, and what they should do."
-        )
-        response = client.chat.completions.create(
+        ai_client = openai.OpenAI()  # reads OPENAI_API_KEY from environment
+        response = ai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": _SYSTEM},
+                {"role": "system", "content": _EXPLAIN_SYSTEM},
                 {"role": "user",   "content": prompt},
             ],
-            max_tokens=130,
-            temperature=0.3,
+            max_tokens=120,
+            temperature=0.7,
         )
         explanation = (response.choices[0].message.content or "").strip()
         if not explanation:
-            raise ValueError("Empty response from OpenAI")
+            raise ValueError("Empty LLM response")
 
     except Exception:
-        # Simple, human fallback — no jargon, always 3 sentences
-        if body.risk_score >= 61:
-            explanation = (
-                "This image may not be real. "
-                "We found signs that it could have been made by a computer or heavily edited. "
-                "Be careful before trusting, sharing, or acting on this image."
-            )
-        elif body.risk_score >= 31:
-            explanation = (
-                "This image has some unusual signs but we are not fully sure. "
-                "It could be a real photo that was slightly changed, or it may have been created digitally. "
-                "Check where this image came from before trusting it."
-            )
-        else:
-            explanation = (
-                "This looks like a normal photo. "
-                "We did not find strong signs that it was created by a computer or edited. "
-                "It is likely a real photograph taken with a camera."
-            )
+        logger.warning(
+            "explain_image_llm_failed_using_fallback",
+            extra={"risk_level": body.risk_level, "risk_score": body.risk_score},
+        )
+        explanation = _build_fallback(
+            body.risk_level, body.risk_score, body.highlights, body.recommendation
+        )
+
+    # ── Cache the result ───────────────────────────────────────────────────────
+    try:
+        get_redis().set(cache_key, explanation, ex=_EXPLAIN_CACHE_TTL_SECONDS)
+    except Exception:
+        pass  # Redis unavailable — non-fatal
 
     return {"explanation": explanation}
