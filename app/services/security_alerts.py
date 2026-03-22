@@ -106,6 +106,52 @@ def dispatch_plan_alerts(
     }
 
 
+def try_create_scan_alert(
+    db: Session,
+    *,
+    user,
+    client_ip: str | None,
+    risk_score: int,
+    analysis_type: str,
+    scan_id: str | None = None,
+) -> None:
+    """
+    Non-throwing helper: create an alert_event for MEDIUM (≥40) or HIGH (≥70)
+    risk scans.  Safe to call from any scan route — never raises.
+    """
+    if risk_score < 40:
+        return
+    trigger = (
+        f"{analysis_type.upper()}_HIGH_RISK_SCAN"
+        if risk_score >= 70
+        else f"{analysis_type.upper()}_MEDIUM_RISK_SCAN"
+    )
+    try:
+        from app.services.alert_rate_limiter import enforce_alert_limits  # local import avoids circular
+        enforce_alert_limits(db, str(user.id), client_ip, None,
+                             plan=getattr(user, "plan", None))
+        event = create_alert_event(
+            db=db,
+            user_id=user.id,
+            trigger_type=trigger,
+            analysis_type=analysis_type[:10],
+            risk_score=int(risk_score),
+        )
+        dispatch_plan_alerts(
+            db=db,
+            user=user,
+            trigger_type=trigger,
+            risk_score=int(risk_score),
+            scan_id=scan_id,
+            alert_event_id=event.id,
+        )
+        event.status = "SENT"
+        db.add(event)
+        db.commit()
+    except Exception:
+        pass  # never disrupt the scan response
+
+
 def _build_event_hash(*, user_id: str, trigger_type: str, risk_score: int) -> str:
     payload = f"{user_id}:{trigger_type}:{risk_score}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

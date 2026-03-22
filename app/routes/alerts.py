@@ -57,14 +57,63 @@ def alert_summary(current_user: User = Depends(get_current_user), db: Session = 
         {"uid": str(current_user.id)},
     ).mappings().all()
     alerts = [_build_alert_response(row) for row in rows]
+    # Return field names that exactly match the frontend AlertsSummaryResponse model
     payload = {
         "total_alerts": len(alerts),
-        "high_risk": sum(1 for alert in alerts if alert["severity"] == "high"),
-        "medium_risk": sum(1 for alert in alerts if alert["severity"] == "medium"),
-        "low_risk": sum(1 for alert in alerts if alert["severity"] == "low"),
-        "latest_alert": alerts[0] if alerts else None,
+        "high_risk": sum(1 for a in alerts if a["severity"] == "high"),
+        "medium_risk": sum(1 for a in alerts if a["severity"] == "medium"),
+        "low_risk": sum(1 for a in alerts if a["severity"] == "low"),
     }
-    return {**payload, "data": payload}
+    return payload
+
+
+@router.get("/family-activity")
+def family_activity(
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns recent scan activity from users who are in the current user's
+    trusted-contacts circle (contact_user_id is set — i.e. they are also
+    registered GO Suraksha users).  Shown in the Family → alerts tab.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                COALESCE(u.name, tc.name, 'Family Member') AS member_name,
+                UPPER(COALESCE(sh.type, 'TEXT'))            AS scan_type,
+                UPPER(COALESCE(sh.risk, 'UNKNOWN'))         AS risk_level,
+                LEFT(COALESCE(sh.input_text, ''), 60)       AS scan_input,
+                sh.created_at
+            FROM trusted_contacts tc
+            LEFT JOIN users u
+                   ON u.id = tc.contact_user_id
+            LEFT JOIN scan_history sh
+                   ON sh.user_id = tc.contact_user_id
+            WHERE tc.owner_user_id = CAST(:uid AS uuid)
+              AND tc.status        = 'ACTIVE'
+              AND sh.id IS NOT NULL
+              AND sh.risk IN ('medium', 'high', 'MEDIUM', 'HIGH')
+            ORDER BY sh.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"uid": str(current_user.id), "limit": limit},
+    ).mappings().all()
+
+    activity = [
+        {
+            "member_name": r["member_name"],
+            "scan_type":   r["scan_type"],
+            "risk_level":  r["risk_level"],
+            "scan_input":  r["scan_input"],
+            "created_at":  r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+    return {"count": len(activity), "activity": activity}
 
 
 @router.get("/refresh")

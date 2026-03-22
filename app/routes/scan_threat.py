@@ -14,7 +14,7 @@ from app.services.threat.threat_analyzer import analyze_threat
 from app.services.response_builder import build_scan_response
 from app.services.risk_mapper import derive_risk_level_from_score
 from app.services.scan_logger import log_scan_event
-from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
+from app.services.security_alerts import create_alert_event, dispatch_plan_alerts, try_create_scan_alert
 from app.enums.scan_type import ScanType
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
@@ -131,28 +131,14 @@ def scan_threat(
         },
     )
 
-    if int(response.risk_score) >= 70:
-        try:
-            enforce_alert_limits(db, str(current_user.id), request.client.host if request.client else None, None, plan=plan)
-            event = create_alert_event(
-                db=db,
-                user_id=current_user.id,
-                trigger_type="THREAT_HIGH_RISK_SCAN",
-                analysis_type="THREAT",
-                risk_score=int(response.risk_score),
-            )
-            dispatch_plan_alerts(
-                db=db,
-                user=current_user,
-                trigger_type="THREAT_HIGH_RISK_SCAN",
-                risk_score=int(response.risk_score),
-                scan_id=scan_id,
-                alert_event_id=event.id,
-            )
-            event.status = "SENT"
-            db.add(event)
-            db.commit()
-        except Exception:
-            logger.exception("threat_scan_alert_failed", extra={"scan_id": scan_id, "user_id": str(current_user.id)})
+    # Create alert for MEDIUM (≥40) or HIGH (≥70) risk
+    try_create_scan_alert(
+        db,
+        user=current_user,
+        client_ip=request.client.host if request.client else None,
+        risk_score=int(response.risk_score),
+        analysis_type="THREAT",
+        scan_id=scan_id,
+    )
 
     return final_payload

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from email_validator import EmailNotValidError, validate_email
 
 from app.core.features import Feature, has_feature, normalize_plan
+from app.db import get_db
 from app.routes.scan_base import (
     apply_scan_rate_limits,
     generate_scan_id,
@@ -15,7 +16,9 @@ from app.schemas.scan_email import EmailScanRequest
 from app.services.email import email_analyzer
 from app.services.response_builder import build_scan_response
 from app.services.scan_logger import log_scan_event
+from app.services.security_alerts import try_create_scan_alert
 from app.enums.scan_type import ScanType
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
 logger = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ def scan_email(
     payload: EmailScanRequest,
     request: Request,
     current_user=Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     raw_email = (payload.email or "").strip()
     if not raw_email:
@@ -91,6 +95,16 @@ def scan_email(
         risk_score=result["risk_score"],
         endpoint="/scan/email",
         plan=plan,
+    )
+
+    # Create alert for MEDIUM / HIGH risk
+    try_create_scan_alert(
+        db,
+        user=current_user,
+        client_ip=request.client.host if request.client else None,
+        risk_score=int(result["risk_score"]),
+        analysis_type="EMAIL",
+        scan_id=scan_id,
     )
 
     return response
