@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20260322_01"
-down_revision = "20260321_01_supabase_user_id"
+down_revision = "20260321_01"
 branch_labels = None
 depends_on = None
 
