@@ -45,24 +45,55 @@ def list_alerts(
 
 @router.get("/summary")
 def alert_summary(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    STEP 2: Returns combined alert counts for the current user AND their
+    registered trusted contacts (family members on GO Suraksha).
+    This gives a holistic threat picture on the Alerts summary card.
+    """
     rows = db.execute(
         text(
             """
-            SELECT id, analysis_type, risk_score, created_at, status
-            FROM alert_events
+            -- User's own alerts
+            SELECT risk_score FROM alert_events
             WHERE user_id = CAST(:uid AS uuid)
-            ORDER BY created_at DESC
+
+            UNION ALL
+
+            -- Family / trusted contacts' alerts (registered GO Suraksha users only)
+            SELECT ae.risk_score
+            FROM alert_events ae
+            JOIN trusted_contacts tc
+              ON ae.user_id = tc.contact_user_id
+            WHERE tc.owner_user_id  = CAST(:uid AS uuid)
+              AND tc.status         = 'ACTIVE'
+              AND tc.contact_user_id IS NOT NULL
             """
         ),
         {"uid": str(current_user.id)},
     ).mappings().all()
-    alerts = [_build_alert_response(row) for row in rows]
-    # Return field names that exactly match the frontend AlertsSummaryResponse model
+
+    high_count   = sum(1 for r in rows if int(r["risk_score"] or 0) >= 70)
+    medium_count = sum(1 for r in rows if 40 <= int(r["risk_score"] or 0) < 70)
+    low_count    = sum(1 for r in rows if int(r["risk_score"] or 0) < 40)
+    total        = len(rows)
+
+    logger.info(
+        "alerts_summary",
+        extra={
+            "user_id": str(current_user.id),
+            "total":   total,
+            "high":    high_count,
+            "medium":  medium_count,
+            "low":     low_count,
+        },
+    )
+
+    # Field names MUST exactly match frontend AlertsSummaryResponse data class
     payload = {
-        "total_alerts": len(alerts),
-        "high_risk": sum(1 for a in alerts if a["severity"] == "high"),
-        "medium_risk": sum(1 for a in alerts if a["severity"] == "medium"),
-        "low_risk": sum(1 for a in alerts if a["severity"] == "low"),
+        "total_alerts": total,
+        "high_risk":    high_count,
+        "medium_risk":  medium_count,
+        "low_risk":     low_count,
     }
     return payload
 
@@ -74,18 +105,18 @@ def family_activity(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Returns recent scan activity from users who are in the current user's
-    trusted-contacts circle (contact_user_id is set — i.e. they are also
-    registered GO Suraksha users).  Shown in the Family → alerts tab.
+    Returns recent MEDIUM/HIGH scan activity from users in the current user's
+    trusted-contacts circle.  Shown in the Family tab of the Threat Center.
+    BUG FIX: was using sh.type (wrong); corrected to sh.scan_type.
     """
     rows = db.execute(
         text(
             """
             SELECT
-                COALESCE(u.name, tc.name, 'Family Member') AS member_name,
-                UPPER(COALESCE(sh.type, 'TEXT'))            AS scan_type,
-                UPPER(COALESCE(sh.risk, 'UNKNOWN'))         AS risk_level,
-                LEFT(COALESCE(sh.input_text, ''), 60)       AS scan_input,
+                COALESCE(u.name, tc.name, 'Family Member')  AS member_name,
+                UPPER(COALESCE(sh.scan_type, 'TEXT'))        AS scan_type,
+                UPPER(COALESCE(sh.risk, 'UNKNOWN'))          AS risk_level,
+                LEFT(COALESCE(sh.input_text, ''), 60)        AS scan_input,
                 sh.created_at
             FROM trusted_contacts tc
             LEFT JOIN users u
@@ -114,6 +145,94 @@ def family_activity(
         for r in rows
     ]
     return {"count": len(activity), "activity": activity}
+
+
+@router.get("/family-feed")
+def family_feed(
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    STEP 2: Returns MEDIUM/HIGH alert events from registered trusted contacts.
+    Unlike /family-activity (scan_history based), this uses alert_events which
+    includes push-notification delivery context and richer severity data.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                COALESCE(u.name, tc.name, 'Family Member') AS member_name,
+                UPPER(COALESCE(ae.scan_type, ae.analysis_type, 'SCAN')) AS scan_type,
+                ae.risk_score,
+                ae.created_at
+            FROM trusted_contacts tc
+            LEFT JOIN users u
+                   ON u.id = tc.contact_user_id
+            JOIN alert_events ae
+                   ON ae.user_id = tc.contact_user_id
+            WHERE tc.owner_user_id   = CAST(:uid AS uuid)
+              AND tc.status          = 'ACTIVE'
+              AND tc.contact_user_id IS NOT NULL
+              AND ae.risk_score      >= 40
+            ORDER BY ae.created_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"uid": str(current_user.id), "limit": limit},
+    ).mappings().all()
+
+    feed = [
+        {
+            "member_name": r["member_name"],
+            "scan_type":   r["scan_type"],
+            "risk_level":  _severity_for_score(int(r["risk_score"])),
+            "risk_score":  int(r["risk_score"]),
+            "created_at":  r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+    return {"count": len(feed), "feed": feed}
+
+
+@router.get("/debug/latest")
+def debug_latest_alerts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    STEP 1: Dev/debug endpoint — returns the 10 most recent alert_events for
+    the authenticated user.  Useful for verifying that alert creation is
+    working correctly after scans.  No sensitive data beyond the user's own.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT id, analysis_type, scan_type, risk_score, risk_level,
+                   status, created_at, extra_signals
+            FROM alert_events
+            WHERE user_id = CAST(:uid AS uuid)
+            ORDER BY created_at DESC
+            LIMIT 10
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).mappings().all()
+
+    alerts = [
+        {
+            "id":            r["id"],
+            "analysis_type": r["analysis_type"],
+            "scan_type":     r["scan_type"],
+            "risk_score":    int(r["risk_score"]),
+            "risk_level":    r["risk_level"] or _severity_for_score(int(r["risk_score"])),
+            "status":        r["status"],
+            "created_at":    r["created_at"].isoformat() if r["created_at"] else None,
+            "extra_signals": r["extra_signals"],
+        }
+        for r in rows
+    ]
+    return {"user_id": str(current_user.id), "count": len(alerts), "alerts": alerts}
 
 
 @router.get("/refresh")
@@ -194,6 +313,7 @@ def trigger_media_alert(
             analysis_type=payload.analysis_type,
             risk_score=int(payload.risk_score),
             status="PENDING",
+            scan_type="MEDIA",
         )
     except Exception:
         db.rollback()
@@ -223,17 +343,19 @@ def trigger_media_alert(
     return MediaRiskAlertResponse(status="ALERT_SENT", message="Alert processed successfully.", dispatch=dispatch)
 
 
-
 def _build_alert_response(row) -> dict:
-    severity = _severity_for_score(int(row["risk_score"]))
-    title = _title_for_alert(str(row["analysis_type"]), severity)
+    risk_score = int(row["risk_score"])
+    severity = _severity_for_score(risk_score)
+    analysis_type = str(row["analysis_type"])
+    title = _title_for_alert(analysis_type, severity)
     return {
-        "id": row["id"],
-        "alert_type": str(row["analysis_type"]).upper(),
-        "severity": severity,
-        "title": title,
-        "description": _description_for_alert(str(row["analysis_type"]), int(row["risk_score"]), row["status"]),
-        "created_at": row["created_at"],
+        "id":              row["id"],
+        "alert_type":      analysis_type.upper(),
+        "severity":        severity,
+        "title":           title,
+        "description":     _description_for_alert(analysis_type, risk_score, row["status"]),
+        "risk_score":      risk_score,
+        "created_at":      row["created_at"],
         "related_scan_id": None,
     }
 

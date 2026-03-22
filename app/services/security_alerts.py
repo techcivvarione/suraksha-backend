@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.services.security_plan_limits import (
 )
 from app.services.trusted_alerts import notify_trusted_contacts
 
+logger = logging.getLogger(__name__)
 notifier = NotificationService()
 
 
@@ -28,18 +30,48 @@ def create_alert_event(
     media_hash: str | None = None,
     analysis_type: str = "SYSTEM",
     status: str = "PENDING",
+    # STEP 6: richer signal fields
+    scan_type: str | None = None,
+    risk_level: str | None = None,
+    extra_signals: dict | None = None,
 ) -> AlertEvent:
+    # STEP 1: mandatory field validation — skip if risk_score is unusable
+    if risk_score is None:
+        raise ValueError("risk_score is required for alert creation")
+
+    derived_risk_level = risk_level or _risk_level_for_score(int(risk_score))
+
     event = AlertEvent(
         user_id=user_id,
-        media_hash=media_hash or _build_event_hash(user_id=str(user_id), trigger_type=trigger_type, risk_score=risk_score),
+        media_hash=media_hash or _build_event_hash(
+            user_id=str(user_id), trigger_type=trigger_type, risk_score=risk_score
+        ),
         analysis_type=(analysis_type or "SYSTEM")[:10],
         risk_score=int(risk_score),
         notified_contact_id=None,
         status=status,
+        scan_type=(scan_type or analysis_type or "SYSTEM")[:20] if scan_type or analysis_type else None,
+        risk_level=derived_risk_level,
+        extra_signals=extra_signals,
     )
     db.add(event)
     db.commit()
     db.refresh(event)
+
+    # STEP 1: structured alert_created log for every alert
+    logger.info(
+        "alert_created",
+        extra={
+            "alert_event_id": event.id,
+            "user_id":        str(user_id),
+            "trigger_type":   trigger_type,
+            "risk_score":     int(risk_score),
+            "risk_level":     derived_risk_level,
+            "scan_type":      event.scan_type,
+            "analysis_type":  event.analysis_type,
+        },
+    )
+
     log_alert_event(
         alert_event_id=event.id,
         user_id=str(user_id),
@@ -114,16 +146,33 @@ def try_create_scan_alert(
     risk_score: int,
     analysis_type: str,
     scan_id: str | None = None,
+    extra_signals: dict | None = None,
 ) -> None:
     """
     Non-throwing helper: create an alert_event for MEDIUM (≥40) or HIGH (≥70)
     risk scans.  Safe to call from any scan route — never raises.
+
+    STEP 5: Smart severity — if extra_signals contains phishing_detected=True
+    or suspicious_domain=True, the effective risk is upgraded to HIGH (≥70)
+    even if the numeric score is lower.
     """
-    if risk_score < 40:
+    # STEP 1: validate inputs before doing anything
+    if risk_score is None:
+        logger.warning("try_create_scan_alert: risk_score is None, skipping", extra={"analysis_type": analysis_type})
         return
+
+    # STEP 5: smart severity upgrade from extra signals
+    effective_score = int(risk_score)
+    signals = extra_signals or {}
+    if signals.get("phishing_detected") or signals.get("suspicious_domain"):
+        effective_score = max(effective_score, 70)  # force HIGH
+
+    if effective_score < 40:
+        return
+
     trigger = (
         f"{analysis_type.upper()}_HIGH_RISK_SCAN"
-        if risk_score >= 70
+        if effective_score >= 70
         else f"{analysis_type.upper()}_MEDIUM_RISK_SCAN"
     )
     try:
@@ -135,13 +184,16 @@ def try_create_scan_alert(
             user_id=user.id,
             trigger_type=trigger,
             analysis_type=analysis_type[:10],
-            risk_score=int(risk_score),
+            risk_score=effective_score,
+            scan_type=analysis_type.upper()[:20],
+            risk_level=_risk_level_for_score(effective_score),
+            extra_signals=extra_signals,
         )
         dispatch_plan_alerts(
             db=db,
             user=user,
             trigger_type=trigger,
-            risk_score=int(risk_score),
+            risk_score=effective_score,
             scan_id=scan_id,
             alert_event_id=event.id,
         )
@@ -150,6 +202,14 @@ def try_create_scan_alert(
         db.commit()
     except Exception:
         pass  # never disrupt the scan response
+
+
+def _risk_level_for_score(risk_score: int) -> str:
+    if risk_score >= 70:
+        return "high"
+    if risk_score >= 40:
+        return "medium"
+    return "low"
 
 
 def _build_event_hash(*, user_id: str, trigger_type: str, risk_score: int) -> str:

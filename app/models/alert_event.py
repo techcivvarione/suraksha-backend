@@ -1,5 +1,5 @@
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Index, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
 from app.db import Base
@@ -19,3 +19,7 @@ class AlertEvent(Base):
     notified_contact_id = Column(UUID(as_uuid=True), nullable=True)
     status = Column(String(20), nullable=False, server_default=text("'SENT'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # STEP 6: richer context columns (nullable — safe for existing rows)
+    scan_type = Column(String(20), nullable=True, index=True)      # "THREAT", "EMAIL", "IMAGE"
+    risk_level = Column(String(10), nullable=True, index=True)     # "high", "medium", "low"
+    extra_signals = Column(JSONB, nullable=True)                   # phishing flags, domain, source

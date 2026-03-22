@@ -65,6 +65,7 @@ from app.routes.scan_base import apply_scan_rate_limits, require_user
 from app.services.plan_limits import LimitType, enforce_limit
 from app.services.redis_store import allow_daily_limit, get_redis
 from app.services.risk_mapper import derive_risk_level_from_score
+from app.services.security_alerts import try_create_scan_alert
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
@@ -621,6 +622,16 @@ async def scan_image(
             "signal_count":      len(result["technical_signals"]),
             "endpoint":          "/scan/image",
         },
+    )
+
+    # STEP 1: create alert for MEDIUM (≥40) or HIGH (≥70) risk image scans
+    try_create_scan_alert(
+        db,
+        user=current_user,
+        client_ip=client_ip,
+        risk_score=int(result["risk_score"]),
+        analysis_type="IMAGE",
+        scan_id=None,
     )
 
     return result
