@@ -201,7 +201,16 @@ def try_create_scan_alert(
         db.add(event)
         db.commit()
     except Exception:
-        pass  # never disrupt the scan response
+        # STEP 2 — Alert system must NEVER break the scan.
+        # Log the failure so it is visible in monitoring, but do NOT re-raise.
+        logger.exception(
+            "alert_creation_failed",
+            extra={
+                "analysis_type": analysis_type,
+                "risk_score":    risk_score,
+                "user_id":       str(getattr(user, "id", "unknown")),
+            },
+        )
 
 
 def _risk_level_for_score(risk_score: int) -> str:

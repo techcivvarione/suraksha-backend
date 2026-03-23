@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
 from app.routes.scan_base import build_scan_error
+from app.services.safe_response import safe_middleware_response
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +22,15 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
     - Logs method, path, status, latency
     - Extracts user_id safely (if authenticated)
     - Captures IP & User-Agent
-    - Never crashes the app
+    - NEVER crashes the app — always returns a usable JSON response
     """
 
-    @staticmethod
-    def _is_scan_path(path: str) -> bool:
-        return path.startswith("/scan")
+    # Paths where a structured JSON error body is preferred over an HTML 500
+    _HANDLED_PREFIXES = ("/scan", "/qr", "/alerts", "/trusted", "/search")
+
+    @classmethod
+    def _is_handled_path(cls, path: str) -> bool:
+        return any(path.startswith(p) for p in cls._HANDLED_PREFIXES)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         request_id = str(uuid.uuid4())
@@ -48,19 +52,34 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
                     "method": request.method,
                 },
             )
-            if self._is_scan_path(request.url.path):
-                if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
-                    payload = exc.detail
-                    status_code = exc.status_code
-                else:
-                    payload = build_scan_error(
-                        "SCAN_PROCESSING_ERROR",
-                        "Scan could not be completed.",
-                    )
-                    status_code = 500
-                response = JSONResponse(status_code=status_code, content=payload)
+            if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
+                # Route already built a structured error payload — pass it through.
+                # Use the original status code so 400/429 are preserved for clients
+                # that inspect HTTP status; 500s are clamped to 200 for scan paths.
+                raw_status = exc.status_code
+                out_status = (
+                    200
+                    if raw_status >= 500 and self._is_handled_path(request.url.path)
+                    else raw_status
+                )
+                response = JSONResponse(status_code=out_status, content=exc.detail)
+            elif self._is_handled_path(request.url.path):
+                # Unhandled exception on a known API path — return a safe 200 JSON
+                payload = build_scan_error(
+                    "SCAN_PROCESSING_ERROR",
+                    "Scan could not be completed.",
+                )
+                response = JSONResponse(status_code=200, content=payload)
             else:
-                raise exc
+                # Unknown path — still return JSON 200 rather than crashing the server
+                logger.exception(
+                    "middleware_failure",
+                    extra={"request_id": request_id, "path": request.url.path},
+                )
+                response = JSONResponse(
+                    status_code=200,
+                    content=safe_middleware_response(),
+                )
 
         duration_ms = int((time.time() - start_time) * 1000)
 

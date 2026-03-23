@@ -27,6 +27,7 @@ from app.services.qr_validators import (
     validate_upi,
     validate_url,
 )
+from app.services.safe_response import safe_qr_response, safe_qr_report_response
 
 router = APIRouter(prefix="/qr", tags=["QR Secure"])
 logger = logging.getLogger(__name__)
@@ -56,12 +57,31 @@ def analyze_qr(
     db: Session = Depends(get_db, use_cache=False),
 ):
     correlation_id = _build_correlation_id()
-    client_ip = request.client.host or "unknown"
+    client_ip = (request.client.host if request.client else None) or "unknown"
 
     try:
-        normalized = normalize_payload(payload.raw_payload)
+        # ------------------------------------------------------------------
+        # STEP 3 + 5 — Input validation before any processing
+        # ------------------------------------------------------------------
+        raw_payload = getattr(payload, "raw_payload", None)
+        if not raw_payload or not raw_payload.strip():
+            logger.warning(
+                "qr_analyze_empty_payload",
+                extra={"cid": correlation_id, "user_id": str(current_user.id)},
+            )
+            return QrAnalyzeResponse(**safe_qr_response(reason="Invalid or empty QR payload"))
+
+        try:
+            normalized = normalize_payload(raw_payload)
+        except Exception:
+            logger.exception(
+                "qr_parse_failed",
+                extra={"cid": correlation_id, "user_id": str(current_user.id)},
+            )
+            return QrAnalyzeResponse(**safe_qr_response(reason="QR payload could not be parsed"))
+
         detected_type, meta = classify_payload(normalized)
-        payload_for_hash = meta["url"] if detected_type == QrType.URL else normalized
+        payload_for_hash = meta.get("url", normalized) if detected_type == QrType.URL else normalized
         qr_hash = hashlib.sha256(payload_for_hash.encode("utf-8")).hexdigest()
 
         apply_scan_rate_limits(
@@ -91,32 +111,49 @@ def analyze_qr(
         amount: Optional[float] = None
 
         if detected_type == QrType.UPI:
-            ok, upi_reasons = validate_upi(meta["uri"])
-            reasons.extend(upi_reasons)
-            upi_impersonation = any(
-                kw in meta["uri"].lower() for kw in ("support", "refund", "update", "kyc")
-            )
-            # Extract human-readable payment fields from UPI URI
-            is_payment = True
-            try:
-                parsed_upi = urlparse(meta["uri"])
-                params = parse_qs(parsed_upi.query)
-                upi_id = (params.get("pa") or [None])[0]
-                raw_name = (params.get("pn") or [None])[0]
-                merchant_name = raw_name.strip() if raw_name else None
-                raw_amount = (params.get("am") or [None])[0]
-                if raw_amount:
-                    amount = float(raw_amount)
-            except Exception:
-                pass  # Best-effort; leave as None if parsing fails
+            upi_uri = meta.get("uri") or ""
+            if upi_uri:
+                try:
+                    ok, upi_reasons = validate_upi(upi_uri)
+                    reasons.extend(upi_reasons)
+                    upi_impersonation = any(
+                        kw in upi_uri.lower() for kw in ("support", "refund", "update", "kyc")
+                    )
+                    # Extract human-readable payment fields from UPI URI
+                    is_payment = True
+                    parsed_upi = urlparse(upi_uri)
+                    params = parse_qs(parsed_upi.query)
+                    upi_id = (params.get("pa") or [None])[0]
+                    raw_name = (params.get("pn") or [None])[0]
+                    merchant_name = raw_name.strip() if raw_name else None
+                    raw_amount = (params.get("am") or [None])[0]
+                    if raw_amount:
+                        try:
+                            amount = float(raw_amount)
+                        except (ValueError, TypeError):
+                            amount = None
+                except Exception:
+                    logger.exception(
+                        "qr_upi_parse_failed",
+                        extra={"cid": correlation_id},
+                    )
+                    # Best-effort UPI parse; continue with defaults
+            else:
+                reasons.append("UPI URI missing")
         elif detected_type == QrType.URL:
-            ok, url_reasons, url_meta = validate_url(meta["url"])
-            reasons.extend(url_reasons)
-            homograph = url_meta.get("homograph", False)
-            shortener = url_meta.get("is_shortener", False)
-            domain_age_risk = url_meta.get("domain_age_risk", False)
-            if url_meta.get("is_ip_host"):
-                reasons.append("IP host not allowed")
+            url_val = meta.get("url") or ""
+            if url_val:
+                try:
+                    ok, url_reasons, url_meta = validate_url(url_val)
+                    reasons.extend(url_reasons)
+                    homograph = url_meta.get("homograph", False)
+                    shortener = url_meta.get("is_shortener", False)
+                    domain_age_risk = url_meta.get("domain_age_risk", False)
+                    if url_meta.get("is_ip_host"):
+                        reasons.append("IP host not allowed")
+                except Exception:
+                    logger.exception("qr_url_validate_failed", extra={"cid": correlation_id})
+                    reasons.append("URL validation failed")
         else:
             text_lower = normalized.lower()
             if any(kw in text_lower for kw in SUSPICIOUS_KEYWORDS):
@@ -126,16 +163,20 @@ def analyze_qr(
                 reasons.append("Zero-width character detected")
             if is_mixed_script(normalized):
                 reasons.append("Mixed-script content")
-            ok = True
 
         blacklist_hit = _external_blacklist_check(qr_hash, timeout_ms=200)
         if blacklist_hit:
             reasons.append("Blacklist match")
 
-        with db.begin():
-            reputation = get_or_create_reputation(db, qr_hash)
-            reported_count = int(reputation.reported_count or 0)
-            is_flagged = bool(reputation.is_flagged)
+        try:
+            with db.begin():
+                reputation = get_or_create_reputation(db, qr_hash)
+                reported_count = int(reputation.reported_count or 0)
+                is_flagged = bool(reputation.is_flagged)
+        except Exception:
+            logger.exception("qr_reputation_lookup_failed", extra={"cid": correlation_id})
+            reported_count = 0
+            is_flagged = False
 
         risk_score, risk_level = score_risk(
             reported_count=reported_count,
@@ -151,7 +192,7 @@ def analyze_qr(
             "LOW": "Proceed with caution.",
             "MEDIUM": "Verify with sender before proceeding.",
             "HIGH": "Do not proceed; treat as malicious.",
-        }[risk_level]
+        }.get(risk_level, "Verify the QR code source before proceeding.")
 
         # Human-readable summary
         payee = merchant_name or upi_id or "Unknown"
@@ -180,7 +221,7 @@ def analyze_qr(
                 summary = "This QR code is dangerous. Do not open it."
 
         logger.info(
-            "QR analyze completed",
+            "qr_analyze_completed",
             extra={
                 "cid": correlation_id,
                 "user_id": str(current_user.id),
@@ -209,8 +250,17 @@ def analyze_qr(
     except HTTPException:
         raise
     except Exception:
-        logger.exception("QR analyze failed", extra={"cid": correlation_id, "user_id": str(current_user.id)})
-        raise HTTPException(status_code=500, detail="QR analysis failed")
+        # STEP 1 — Global fail-safe: NEVER return 500 to the user
+        logger.exception(
+            "scan_failed",
+            extra={
+                "endpoint": "/qr/analyze",
+                "cid": correlation_id,
+                "user_id": str(getattr(current_user, "id", "unknown")),
+                "input_size": len(getattr(payload, "raw_payload", "") or ""),
+            },
+        )
+        return QrAnalyzeResponse(**safe_qr_response(reason="QR analysis could not be completed"))
 
 
 @router.post("/report", response_model=QrReportResponse)
@@ -271,6 +321,14 @@ def report_qr(
     except HTTPException:
         raise
     except Exception:
-        logger.exception("QR report failed", extra={"cid": correlation_id, "user_id": str(current_user.id)})
-        raise HTTPException(status_code=500, detail="Unable to report QR code")
+        # STEP 1 — Global fail-safe: NEVER return 500 to the user
+        logger.exception(
+            "scan_failed",
+            extra={
+                "endpoint": "/qr/report",
+                "cid": correlation_id,
+                "user_id": str(getattr(current_user, "id", "unknown")),
+            },
+        )
+        return QrReportResponse(**safe_qr_report_response())
 # SECURE QR END

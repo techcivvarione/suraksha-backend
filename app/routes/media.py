@@ -11,6 +11,7 @@ from app.services.media_validator import validate_upload
 from app.services.risk_mapper import map_probability_to_risk
 from app.services.redis_store import acquire_cooldown, allow_daily_limit, allow_sliding_window
 from app.services.media_analysis_store import store_recent_analysis
+from app.services.safe_response import safe_scan_response
 
 router = APIRouter(prefix="/media", tags=["Media"])
 logger = logging.getLogger(__name__)
@@ -80,7 +81,16 @@ async def analyze_media(
         store_recent_analysis(user_id, validation.file_hash, validation.analysis_type, score, level)
         return mapped
     except DeepfakeServiceError:
-        raise HTTPException(status_code=500, detail="Media analysis failed")
+        # STEP 1 — Global fail-safe: NEVER return 500 to the user
+        logger.exception(
+            "scan_failed",
+            extra={
+                "endpoint": "/media/analyze",
+                "cid": correlation_id,
+                "user_id": user_id,
+            },
+        )
+        return safe_scan_response(analysis_type="MEDIA", endpoint="/media/analyze")
     finally:
         if os.path.exists(validation.path):
             try:

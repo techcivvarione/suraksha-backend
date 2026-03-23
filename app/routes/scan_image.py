@@ -65,6 +65,7 @@ from app.routes.scan_base import apply_scan_rate_limits, require_user
 from app.services.plan_limits import LimitType, enforce_limit
 from app.services.redis_store import allow_daily_limit, get_redis
 from app.services.risk_mapper import derive_risk_level_from_score
+from app.services.safe_response import safe_scan_response
 from app.services.security_alerts import try_create_scan_alert
 from sqlalchemy.orm import Session
 
@@ -605,11 +606,19 @@ async def scan_image(
     except HTTPException:
         raise
     except Exception:
+        # STEP 1 — Global fail-safe: NEVER return 500 to the user
         logger.exception(
-            "scan_image_detection_failed",
-            extra={"user_id": str(current_user.id), "endpoint": "/scan/image"},
+            "scan_failed",
+            extra={
+                "endpoint": "/scan/image",
+                "user_id": str(current_user.id),
+                "input_size": len(image_bytes),
+            },
         )
-        raise HTTPException(status_code=500, detail="Image analysis failed")
+        return safe_scan_response(
+            analysis_type="IMAGE",
+            endpoint="/scan/image",
+        )
 
     logger.info(
         "scan_image_complete",
@@ -624,7 +633,7 @@ async def scan_image(
         },
     )
 
-    # STEP 1: create alert for MEDIUM (≥40) or HIGH (≥70) risk image scans
+    # Create alert for MEDIUM (≥40) or HIGH (≥70) risk — safe helper, never raises
     try_create_scan_alert(
         db,
         user=current_user,
