@@ -123,6 +123,32 @@ def _compute_and_upsert(db: Session, user_id: str) -> None:
     try:
         from app.services.cyber_card_scorer import calculate_cyber_score
 
+        # Debug: log scan counts so we can confirm persistence is working
+        try:
+            email_count = db.execute(
+                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid) AND scan_type = 'EMAIL'"),
+                {"uid": user_id},
+            ).scalar() or 0
+            password_count = db.execute(
+                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid) AND scan_type = 'PASSWORD'"),
+                {"uid": user_id},
+            ).scalar() or 0
+            total_scans = db.execute(
+                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid)"),
+                {"uid": user_id},
+            ).scalar() or 0
+            logger.info(
+                "cyber_card_debug",
+                extra={
+                    "user_id": user_id,
+                    "email_count": email_count,
+                    "password_count": password_count,
+                    "total_scans": total_scans,
+                },
+            )
+        except Exception:
+            pass  # debug log failure never blocks scoring
+
         result = calculate_cyber_score(db, user_id)
         score  = result["score"]
         level  = result["level"]
