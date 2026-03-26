@@ -2,9 +2,9 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -18,88 +18,172 @@ from app.schemas.cyber_card import (
     CyberCardHistoryResponse,
     CyberCardLockedResponse,
     CyberCardPendingResponse,
+    CyberCardSignals,
 )
+from app.services.cyber_card_constants import get_risk_level, get_risk_level_v2
 
 logger = logging.getLogger(__name__)
 
-_BASE_SCORE = 600
-_MIN_SCORE  = 300
-_MAX_SCORE  = 999
-
 router = APIRouter(prefix="/cyber-card", tags=["Cyber Card"])
 
+# How long (seconds) a cached score is considered fresh before recomputing
+_CACHE_TTL_SECONDS = 300  # 5 minutes
 
-def _generate_card_id(name: str, user_id: str):
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _generate_card_id(name: str, user_id: str) -> str:
     initial = name[0].upper() if name else "X"
     h = hashlib.sha1(user_id.encode()).hexdigest()[:6].upper()
     year = datetime.utcnow().year % 100
     return f"CC-{year:02d}-{initial}-{h}"
 
 
-def _normalize_cyber_card_signals(raw_signals) -> dict:
-    signals = dict(raw_signals or {})
-    email_scan_count = int(signals.get("email_scan_count", signals.get("email_breaches", 0)) or 0)
-    password_scan_count = int(signals.get("password_scan_count", signals.get("password_breaches", 0)) or 0)
-    return {
-        "email_scan_count": email_scan_count,
-        "password_scan_count": password_scan_count,
-        "scan_reward_points": int(signals.get("scan_reward_points", 0) or 0),
-        "ocr_bonus": int(signals.get("ocr_bonus", 0) or 0),
-        "scam_reports": int(signals.get("scam_reports", 0) or 0),
-        "eligibility": str(signals.get("eligibility", "ELIGIBLE")),
-        "lock_reason": signals.get("lock_reason"),
-    }
+def _normalize_signals(raw) -> CyberCardSignals:
+    d = dict(raw or {})
+
+    def _int(key: str) -> int:
+        v = d.get(key, 0)
+        return int(v) if isinstance(v, (int, float)) else (int(v) if str(v).isdigit() else 0)
+
+    return CyberCardSignals(
+        email_scan_count    = _int("email_scan_count"),
+        password_scan_count = _int("password_scan_count"),
+        scan_reward_points  = _int("scan_reward_points"),
+        ocr_bonus           = _int("ocr_bonus"),
+        scam_reports        = _int("scam_reports"),
+        eligibility         = str(d.get("eligibility", "ELIGIBLE")),
+        lock_reason         = d.get("lock_reason"),
+    )
 
 
-def _get_cyber_card(db: Session, user_id: str):
-    logger.info("cyber_card_fetch", extra={"user_id": user_id})
+def _to_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _is_stale(updated_at: datetime | None, now: datetime, ttl: int) -> bool:
+    """Return True if updated_at is absent or older than *ttl* seconds."""
+    aware = _to_aware(updated_at)
+    if aware is None:
+        return True
+    return (now - aware).total_seconds() > ttl
+
+
+def _get_cyber_card(db: Session, user_id: str) -> dict | None:
+    """Fetch the most-recent cyber card row for *user_id*.  Returns None if
+    the user or card doesn't exist."""
     user = db.execute(
         text("SELECT name, plan FROM users WHERE id = CAST(:uid AS uuid)"),
         {"uid": user_id},
     ).mappings().first()
-
     if not user:
         return None
 
-    card = db.execute(
+    row = db.execute(
         text(
             """
-            SELECT score, max_score, risk_level, signals, score_month
+            SELECT score, max_score, risk_level, signals,
+                   factors, insights, actions,
+                   score_month, updated_at
             FROM cyber_card_scores
             WHERE user_id = CAST(:uid AS uuid)
-            ORDER BY score_month DESC
+            ORDER BY score_month DESC, updated_at DESC NULLS LAST
             LIMIT 1
             """
         ),
         {"uid": user_id},
     ).mappings().first()
-
-    if not card:
+    if not row:
         return None
 
+    score = int(row["score"] or 0)
     return {
-        "card_id": _generate_card_id(user["name"], user_id),
-        "name": user["name"],
-        "is_paid": user["plan"] in ("GO_PRO", "GO_ULTRA"),
-        "signals": _normalize_cyber_card_signals(card["signals"]),
-        "score_version": "v1",
-        "score": card["score"],
-        "max_score": card["max_score"],
-        "risk_level": card["risk_level"],
-        "score_month": card["score_month"],
+        "card_id":    _generate_card_id(user["name"], user_id),
+        "name":       user["name"],
+        "is_paid":    user["plan"] in ("GO_PRO", "GO_ULTRA"),
+        "score":      score,
+        "max_score":  1000,
+        "risk_level": row["risk_level"] or get_risk_level(score),
+        "level":      get_risk_level_v2(score),
+        "signals":    _normalize_signals(row["signals"]),
+        "factors":    dict(row["factors"]) if row["factors"] else {},
+        "insights":   list(row["insights"]) if row["insights"] else [],
+        "actions":    list(row["actions"]) if row["actions"] else [],
+        "score_month": row["score_month"],
+        "updated_at": row["updated_at"],
+        "score_version": "v2",
     }
+
+
+def _compute_and_upsert(db: Session, user_id: str) -> None:
+    """Run the scoring engine for *user_id* and persist results.
+    Never raises — caller checks the return value of _get_cyber_card instead."""
+    try:
+        from app.services.cyber_card_scorer import calculate_cyber_score
+
+        result = calculate_cyber_score(db, user_id)
+        score  = result["score"]
+        level  = result["level"]
+
+        month_start = db.execute(
+            text(
+                "SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')"
+            )
+        ).scalar()
+
+        db.execute(
+            text(
+                """
+                INSERT INTO cyber_card_scores (
+                    id, user_id, score, max_score, risk_level,
+                    signals, factors, insights, actions,
+                    score_month, updated_at
+                )
+                VALUES (
+                    :id, CAST(:uid AS uuid), :score, 1000, :risk_level,
+                    '{}', CAST(:factors AS jsonb), CAST(:insights AS jsonb),
+                    CAST(:actions AS jsonb), :month, now()
+                )
+                ON CONFLICT (user_id, score_month) DO UPDATE SET
+                    score      = EXCLUDED.score,
+                    risk_level = EXCLUDED.risk_level,
+                    factors    = EXCLUDED.factors,
+                    insights   = EXCLUDED.insights,
+                    actions    = EXCLUDED.actions,
+                    updated_at = now()
+                """
+            ),
+            {
+                "id":         str(uuid.uuid4()),
+                "uid":        user_id,
+                "score":      score,
+                "risk_level": get_risk_level(score),
+                "factors":    json.dumps(result["factors"]),
+                "insights":   json.dumps(result["insights"]),
+                "actions":    json.dumps(result["actions"]),
+                "month":      month_start,
+            },
+        )
+        db.commit()
+        logger.info(
+            "cyber_card_computed",
+            extra={"user_id": user_id, "score": score, "level": level},
+        )
+    except Exception as e:
+        logger.exception(
+            "cyber_card_compute_failed",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        # Never raise — the endpoint handles a missing card gracefully
 
 
 def _get_cyber_card_history(db: Session, user_id: str) -> list[dict]:
     rows = db.execute(
         text(
             """
-            SELECT
-                score_month,
-                score,
-                max_score,
-                risk_level,
-                signals
+            SELECT score_month, score, max_score, risk_level, signals
             FROM cyber_card_scores
             WHERE user_id = CAST(:uid AS uuid)
             ORDER BY score_month DESC
@@ -109,183 +193,35 @@ def _get_cyber_card_history(db: Session, user_id: str) -> list[dict]:
     ).mappings().all()
     return [
         {
-            "month": row["score_month"],
-            "score": row["score"],
-            "max_score": row["max_score"],
+            "month":      row["score_month"],
+            "score":      row["score"],
+            "max_score":  row["max_score"] or 1000,
             "risk_level": row["risk_level"],
-            "signals": _normalize_cyber_card_signals(row["signals"]),
+            "signals":    _normalize_signals(row["signals"]),
         }
         for row in rows
     ]
 
 
-def _compute_and_cache_card(db: Session, user_id: str) -> None:
-    """Compute a real-time Cyber Card score for a user and persist it to
-    ``cyber_card_scores``.  Called by the endpoint when no current-month row
-    exists yet (i.e. the monthly batch job hasn't run).  Mirrors the scoring
-    logic in ``cyber_card_score_job.py`` but skips the 1st-5th eligibility
-    window so users unlock their card as soon as they've done ≥1 email scan
-    AND ≥1 password scan."""
-    try:
-        from app.services.cyber_card_constants import get_risk_level
+# ── Endpoints ────────────────────────────────────────────────────────────────
 
-        month_start = db.execute(
-            text(
-                "SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')"
-            )
-        ).scalar()
-
-        # ── Guard: only compute if mandatory scans are present ────────────
-        email_count = db.execute(
-            text(
-                """
-                SELECT COUNT(*) FROM scan_history
-                WHERE user_id = CAST(:uid AS uuid)
-                  AND scan_type = 'EMAIL'
-                  AND created_at >= :start
-                """
-            ),
-            {"uid": user_id, "start": month_start},
-        ).scalar() or 0
-
-        password_count = db.execute(
-            text(
-                """
-                SELECT COUNT(*) FROM scan_history
-                WHERE user_id = CAST(:uid AS uuid)
-                  AND scan_type = 'PASSWORD'
-                  AND created_at >= :start
-                """
-            ),
-            {"uid": user_id, "start": month_start},
-        ).scalar() or 0
-
-        if email_count == 0 or password_count == 0:
-            # Not enough scans yet — leave card as PENDING
-            logger.info(
-                "cyber_card_pending_insufficient_scans",
-                extra={
-                    "user_id": user_id,
-                    "email_count": email_count,
-                    "password_count": password_count,
-                },
-            )
-            return
-
-        # ── Score calculation (mirrors cyber_card_score_job.py) ───────────
-        score = _BASE_SCORE
-
-        if email_count <= 3:
-            score -= 30
-        elif email_count <= 6:
-            score -= 60
-        elif email_count <= 10:
-            score -= 100
-        elif email_count <= 50:
-            score -= 180
-        else:
-            score -= 300
-
-        if password_count <= 3:
-            score -= 50
-        elif password_count <= 6:
-            score -= 100
-        elif password_count <= 10:
-            score -= 180
-        else:
-            score -= 300
-
-        scan_rows = db.execute(
-            text(
-                """
-                SELECT risk, COUNT(*) AS cnt FROM scan_history
-                WHERE user_id = CAST(:uid AS uuid)
-                  AND scan_type = 'THREAT'
-                  AND created_at >= :start
-                GROUP BY risk
-                """
-            ),
-            {"uid": user_id, "start": month_start},
-        ).mappings().all()
-
-        reward = 0
-        for row in scan_rows:
-            r = (row["risk"] or "").lower()
-            if r == "low":
-                reward += int(row["cnt"]) * 1
-            elif r == "medium":
-                reward += int(row["cnt"]) * 2
-            elif r == "high":
-                reward += int(row["cnt"]) * 3
-        reward = min(reward, 50)
-        score += reward
-
-        score = max(_MIN_SCORE, min(score, _MAX_SCORE))
-        risk_level = get_risk_level(score)
-
-        signals = {
-            "email_scan_count": email_count,
-            "password_scan_count": password_count,
-            "scan_reward_points": reward,
-            "ocr_bonus": 0,
-            "scam_reports": 0,
-            "eligibility": "ELIGIBLE",
-            "lock_reason": None,
-        }
-
-        db.execute(
-            text(
-                """
-                INSERT INTO cyber_card_scores (
-                    id, user_id, score, max_score, risk_level, signals, score_month
-                )
-                VALUES (
-                    :id, CAST(:uid AS uuid), :score, :max,
-                    :level, CAST(:signals AS jsonb), :month
-                )
-                ON CONFLICT (user_id, score_month)
-                DO UPDATE SET
-                    score      = EXCLUDED.score,
-                    risk_level = EXCLUDED.risk_level,
-                    signals    = EXCLUDED.signals,
-                    created_at = now()
-                """
-            ),
-            {
-                "id": str(uuid.uuid4()),
-                "uid": user_id,
-                "score": score,
-                "max": _MAX_SCORE,
-                "level": risk_level,
-                "signals": json.dumps(signals),
-                "month": month_start,
-            },
-        )
-        db.commit()
-        logger.info(
-            "cyber_card_computed_on_demand",
-            extra={"user_id": user_id, "score": score, "risk_level": risk_level},
-        )
-    except Exception as e:
-        logger.exception(
-            "cyber_card_compute_failed",
-            extra={"user_id": user_id, "error": str(e)},
-        )
-        # Never break the endpoint — caller handles the no-card case
-
-
-@router.get("", response_model=CyberCardPendingResponse | CyberCardLockedResponse | CyberCardActiveResponse)
+@router.get(
+    "",
+    response_model=CyberCardPendingResponse | CyberCardLockedResponse | CyberCardActiveResponse,
+)
 def fetch_cyber_card(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_feature(Feature.CYBER_CARD_ACCESS)),
 ):
     user_id = str(current_user.id)
+    now = datetime.now(timezone.utc)
+
     try:
         card = _get_cyber_card(db, user_id)
 
-        # No card yet — compute one on-the-fly if the user has qualifying scans
-        if not card:
-            _compute_and_cache_card(db, user_id)
+        # Recompute when card is absent or the cached score is stale
+        if card is None or _is_stale(card.get("updated_at"), now, _CACHE_TTL_SECONDS):
+            _compute_and_upsert(db, user_id)
             card = _get_cyber_card(db, user_id)
 
     except SQLAlchemyError:
@@ -298,27 +234,26 @@ def fetch_cyber_card(
     if not card:
         return CyberCardPendingResponse(
             card_status="PENDING",
-            message="Your Cyber Card will be available after completing required security scans.",
+            message="Complete an email and password scan to generate your Cyber Card.",
         )
 
-    signals = card.get("signals") or {}
-    eligibility = signals.get("eligibility", "ELIGIBLE")
-
-    if eligibility == "LOCKED_THIS_MONTH":
-        return CyberCardLockedResponse(
-            card_status="LOCKED",
-            score=card["score"],
-            max_score=card["max_score"],
-            risk_level="Locked",
-            signals=signals,
-            message=(
-                "Mandatory Email & Password scans were not completed "
-                "between 1st-5th of this month. "
-                "Cyber Card will update next month."
-            ),
-        )
-
-    return CyberCardActiveResponse(card_status="ACTIVE", **card)
+    return CyberCardActiveResponse(
+        card_status  = "ACTIVE",
+        card_id      = card["card_id"],
+        name         = card["name"],
+        is_paid      = card["is_paid"],
+        score        = card["score"],
+        max_score    = 1000,
+        risk_level   = card["risk_level"],
+        level        = card["level"],
+        signals      = card["signals"],
+        factors      = card["factors"],
+        insights     = card["insights"],
+        actions      = card["actions"],
+        score_month  = card["score_month"],
+        updated_at   = card["updated_at"],
+        score_version= "v2",
+    )
 
 
 @router.get("/history", response_model=CyberCardHistoryResponse)
@@ -335,12 +270,7 @@ def cyber_card_history(
 
     if not history:
         return CyberCardHistoryResponse(
-            count=0,
-            history=[],
-            message="No Cyber Card history available yet",
+            count=0, history=[], message="No Cyber Card history available yet"
         )
 
-    return CyberCardHistoryResponse(
-        count=len(history),
-        history=history,
-    )
+    return CyberCardHistoryResponse(count=len(history), history=history)
