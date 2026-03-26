@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 import uuid
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ class HistoryItem(BaseModel):
     risk: str
     score: int
     reasons: dict
+    scan_type: Optional[str] = None
     created_at: datetime
 
 
@@ -41,6 +43,7 @@ def list_history(
                 risk,
                 score,
                 reasons,
+                scan_type,
                 created_at
             FROM scan_history
             WHERE user_id = CAST(:user_id AS uuid)
@@ -74,6 +77,39 @@ def list_history(
 
 
 # =====================================================
+# DEBUG — last 10 scans for current user (TEMP)
+# Must be registered BEFORE /{history_id} to avoid
+# FastAPI matching "debug" as a history_id path param.
+# =====================================================
+@router.get("/debug/scans")
+def debug_scans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = db.execute(
+        text("""
+            SELECT
+                id,
+                scan_type,
+                risk,
+                score,
+                created_at
+            FROM scan_history
+            WHERE user_id = CAST(:user_id AS uuid)
+            ORDER BY created_at DESC
+            LIMIT 10
+        """),
+        {"user_id": str(current_user.id)},
+    ).mappings().all()
+
+    return {
+        "user_id": str(current_user.id),
+        "count": len(rows),
+        "scans": [dict(r) for r in rows],
+    }
+
+
+# =====================================================
 # GET SINGLE HISTORY ITEM
 # =====================================================
 @router.get("/{history_id}")
@@ -90,6 +126,7 @@ def get_history(
                 risk,
                 score,
                 reasons,
+                scan_type,
                 created_at
             FROM scan_history
             WHERE id = CAST(:id AS uuid)

@@ -1,5 +1,7 @@
 import hashlib
+import json
 import logging
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
@@ -19,6 +21,10 @@ from app.schemas.cyber_card import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BASE_SCORE = 600
+_MIN_SCORE  = 300
+_MAX_SCORE  = 999
 
 router = APIRouter(prefix="/cyber-card", tags=["Cyber Card"])
 
@@ -113,6 +119,161 @@ def _get_cyber_card_history(db: Session, user_id: str) -> list[dict]:
     ]
 
 
+def _compute_and_cache_card(db: Session, user_id: str) -> None:
+    """Compute a real-time Cyber Card score for a user and persist it to
+    ``cyber_card_scores``.  Called by the endpoint when no current-month row
+    exists yet (i.e. the monthly batch job hasn't run).  Mirrors the scoring
+    logic in ``cyber_card_score_job.py`` but skips the 1st-5th eligibility
+    window so users unlock their card as soon as they've done ≥1 email scan
+    AND ≥1 password scan."""
+    try:
+        from app.services.cyber_card_constants import get_risk_level
+
+        month_start = db.execute(
+            text(
+                "SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')"
+            )
+        ).scalar()
+
+        # ── Guard: only compute if mandatory scans are present ────────────
+        email_count = db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM scan_history
+                WHERE user_id = CAST(:uid AS uuid)
+                  AND scan_type = 'EMAIL'
+                  AND created_at >= :start
+                """
+            ),
+            {"uid": user_id, "start": month_start},
+        ).scalar() or 0
+
+        password_count = db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM scan_history
+                WHERE user_id = CAST(:uid AS uuid)
+                  AND scan_type = 'PASSWORD'
+                  AND created_at >= :start
+                """
+            ),
+            {"uid": user_id, "start": month_start},
+        ).scalar() or 0
+
+        if email_count == 0 or password_count == 0:
+            # Not enough scans yet — leave card as PENDING
+            logger.info(
+                "cyber_card_pending_insufficient_scans",
+                extra={
+                    "user_id": user_id,
+                    "email_count": email_count,
+                    "password_count": password_count,
+                },
+            )
+            return
+
+        # ── Score calculation (mirrors cyber_card_score_job.py) ───────────
+        score = _BASE_SCORE
+
+        if email_count <= 3:
+            score -= 30
+        elif email_count <= 6:
+            score -= 60
+        elif email_count <= 10:
+            score -= 100
+        elif email_count <= 50:
+            score -= 180
+        else:
+            score -= 300
+
+        if password_count <= 3:
+            score -= 50
+        elif password_count <= 6:
+            score -= 100
+        elif password_count <= 10:
+            score -= 180
+        else:
+            score -= 300
+
+        scan_rows = db.execute(
+            text(
+                """
+                SELECT risk, COUNT(*) AS cnt FROM scan_history
+                WHERE user_id = CAST(:uid AS uuid)
+                  AND scan_type = 'THREAT'
+                  AND created_at >= :start
+                GROUP BY risk
+                """
+            ),
+            {"uid": user_id, "start": month_start},
+        ).mappings().all()
+
+        reward = 0
+        for row in scan_rows:
+            r = (row["risk"] or "").lower()
+            if r == "low":
+                reward += int(row["cnt"]) * 1
+            elif r == "medium":
+                reward += int(row["cnt"]) * 2
+            elif r == "high":
+                reward += int(row["cnt"]) * 3
+        reward = min(reward, 50)
+        score += reward
+
+        score = max(_MIN_SCORE, min(score, _MAX_SCORE))
+        risk_level = get_risk_level(score)
+
+        signals = {
+            "email_scan_count": email_count,
+            "password_scan_count": password_count,
+            "scan_reward_points": reward,
+            "ocr_bonus": 0,
+            "scam_reports": 0,
+            "eligibility": "ELIGIBLE",
+            "lock_reason": None,
+        }
+
+        db.execute(
+            text(
+                """
+                INSERT INTO cyber_card_scores (
+                    id, user_id, score, max_score, risk_level, signals, score_month
+                )
+                VALUES (
+                    :id, CAST(:uid AS uuid), :score, :max,
+                    :level, CAST(:signals AS jsonb), :month
+                )
+                ON CONFLICT (user_id, score_month)
+                DO UPDATE SET
+                    score      = EXCLUDED.score,
+                    risk_level = EXCLUDED.risk_level,
+                    signals    = EXCLUDED.signals,
+                    created_at = now()
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "uid": user_id,
+                "score": score,
+                "max": _MAX_SCORE,
+                "level": risk_level,
+                "signals": json.dumps(signals),
+                "month": month_start,
+            },
+        )
+        db.commit()
+        logger.info(
+            "cyber_card_computed_on_demand",
+            extra={"user_id": user_id, "score": score, "risk_level": risk_level},
+        )
+    except Exception as e:
+        logger.exception(
+            "cyber_card_compute_failed",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        # Never break the endpoint — caller handles the no-card case
+
+
 @router.get("", response_model=CyberCardPendingResponse | CyberCardLockedResponse | CyberCardActiveResponse)
 def fetch_cyber_card(
     db: Session = Depends(get_db),
@@ -121,6 +282,12 @@ def fetch_cyber_card(
     user_id = str(current_user.id)
     try:
         card = _get_cyber_card(db, user_id)
+
+        # No card yet — compute one on-the-fly if the user has qualifying scans
+        if not card:
+            _compute_and_cache_card(db, user_id)
+            card = _get_cyber_card(db, user_id)
+
     except SQLAlchemyError:
         logger.exception("cyber_card_fetch_failed", extra={"user_id": user_id})
         return CyberCardPendingResponse(

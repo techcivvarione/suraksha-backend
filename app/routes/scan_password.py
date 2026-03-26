@@ -1,8 +1,13 @@
+import json
 import uuid
 import logging
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.core.features import normalize_plan
+from app.db import get_db
+from app.enums.scan_type import ScanType
 from app.routes.scan_base import apply_scan_rate_limits, generate_scan_id, raise_scan_error, require_user
 from app.schemas.scan_password import PasswordScanRequest
 from app.services.password.password_analyzer import analyze_password
@@ -18,6 +23,7 @@ logger = logging.getLogger(__name__)
 def scan_password(
     payload: PasswordScanRequest,
     current_user=Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     scan_id = generate_scan_id()
     plan = normalize_plan(getattr(current_user, "plan", None))
@@ -59,11 +65,52 @@ def scan_password(
         log_scan_event(
             scan_id=scan_id,
             user_id=str(current_user.id),
-            scan_type=result["analysis_type"],
+            scan_type=ScanType.PASSWORD.value,
             risk_score=result["risk_score"],
             endpoint="/scan/password",
             plan=plan,
         )
+
+        # ── Persist to scan_history ────────────────────────────────────────
+        try:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO scan_history (
+                        id, user_id, input_text, risk, score, reasons, scan_type, created_at
+                    )
+                    VALUES (
+                        CAST(:id AS uuid), CAST(:user_id AS uuid),
+                        :input_text, :risk, :score, CAST(:reasons AS jsonb), :scan_type, now()
+                    )
+                    ON CONFLICT (id) DO NOTHING
+                    """
+                ),
+                {
+                    "id": scan_id,
+                    "user_id": str(current_user.id),
+                    "input_text": "[password]",  # never store the raw password
+                    "risk": str(result["risk_level"]).lower(),
+                    "score": int(result["risk_score"]),
+                    "reasons": json.dumps(result["reasons"]),
+                    "scan_type": ScanType.PASSWORD.value,
+                },
+            )
+            db.commit()
+            logger.info(
+                "scan_saved",
+                extra={"user_id": str(current_user.id), "scan_type": ScanType.PASSWORD.value},
+            )
+        except Exception as e:
+            logger.exception(
+                "scan_save_failed",
+                extra={
+                    "error": str(e),
+                    "endpoint": "/scan/password",
+                    "user_id": str(current_user.id),
+                },
+            )
+            # DB write failure must NOT break the scan response
 
         return response
 
@@ -82,6 +129,6 @@ def scan_password(
         )
         return safe_scan_response(
             scan_id=scan_id,
-            analysis_type="PASSWORD",
+            analysis_type=ScanType.PASSWORD.value,
             endpoint="/scan/password",
         )
