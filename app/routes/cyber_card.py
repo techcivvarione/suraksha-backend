@@ -199,62 +199,112 @@ def _compute_and_upsert(db: Session, user_id: str) -> None:
             )
         ).scalar()
 
-        upsert_params = {
-            "id":         str(uuid.uuid4()),
-            "uid":        user_id,
-            "score":      score,
-            "risk_level": get_risk_level(score),
-            "factors":    json.dumps(result["factors"]),
-            "insights":   json.dumps(result["insights"]),
-            "actions":    json.dumps(result["actions"]),
-            "month":      month_start,
-        }
+        risk_label = get_risk_level(score)
+        factors_j  = json.dumps(result["factors"])
+        insights_j = json.dumps(result["insights"])
+        actions_j  = json.dumps(result["actions"])
 
-        try:
-            # Full V2 upsert — requires migration 20260326_01 to have run
-            db.execute(
-                text(
-                    """
-                    INSERT INTO cyber_card_scores (
-                        id, user_id, score, max_score, risk_level,
-                        signals, factors, insights, actions,
-                        score_month, updated_at
-                    )
-                    VALUES (
-                        :id, CAST(:uid AS uuid), :score, 1000, :risk_level,
-                        '{}', CAST(:factors AS jsonb), CAST(:insights AS jsonb),
-                        CAST(:actions AS jsonb), :month, now()
-                    )
-                    ON CONFLICT (user_id, score_month) DO UPDATE SET
-                        score      = EXCLUDED.score,
-                        risk_level = EXCLUDED.risk_level,
-                        factors    = EXCLUDED.factors,
-                        insights   = EXCLUDED.insights,
-                        actions    = EXCLUDED.actions,
-                        updated_at = now()
-                    """
-                ),
-                upsert_params,
-            )
-        except Exception:
-            # V2 columns absent — fall back to legacy upsert
-            db.rollback()
-            db.execute(
-                text(
-                    """
-                    INSERT INTO cyber_card_scores (
-                        id, user_id, score, max_score, risk_level, signals, score_month
-                    )
-                    VALUES (
-                        :id, CAST(:uid AS uuid), :score, 1000, :risk_level, '{}', :month
-                    )
-                    ON CONFLICT (user_id, score_month) DO UPDATE SET
-                        score      = EXCLUDED.score,
-                        risk_level = EXCLUDED.risk_level
-                    """
-                ),
-                upsert_params,
-            )
+        # ── Resilient SELECT-first INSERT/UPDATE (no unique constraint required)
+        # Falls back to ON CONFLICT once migration 20260327_01 is applied.
+        existing_id = db.execute(
+            text(
+                """
+                SELECT id FROM cyber_card_scores
+                WHERE user_id = CAST(:uid AS uuid) AND score_month = :month
+                LIMIT 1
+                """
+            ),
+            {"uid": user_id, "month": month_start},
+        ).scalar()
+
+        if existing_id:
+            # Row already exists — UPDATE it
+            try:
+                db.execute(
+                    text(
+                        """
+                        UPDATE cyber_card_scores
+                        SET score      = :score,
+                            risk_level = :risk_level,
+                            factors    = CAST(:factors  AS jsonb),
+                            insights   = CAST(:insights AS jsonb),
+                            actions    = CAST(:actions  AS jsonb),
+                            updated_at = now()
+                        WHERE id = CAST(:existing_id AS uuid)
+                        """
+                    ),
+                    {
+                        "score":       score,
+                        "risk_level":  risk_label,
+                        "factors":     factors_j,
+                        "insights":    insights_j,
+                        "actions":     actions_j,
+                        "existing_id": str(existing_id),
+                    },
+                )
+            except Exception:
+                # V2 columns absent — legacy UPDATE
+                db.rollback()
+                db.execute(
+                    text(
+                        """
+                        UPDATE cyber_card_scores
+                        SET score = :score, risk_level = :risk_level
+                        WHERE id = CAST(:existing_id AS uuid)
+                        """
+                    ),
+                    {"score": score, "risk_level": risk_label, "existing_id": str(existing_id)},
+                )
+        else:
+            # No row yet — INSERT
+            new_id = str(uuid.uuid4())
+            try:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO cyber_card_scores (
+                            id, user_id, score, max_score, risk_level,
+                            signals, factors, insights, actions,
+                            score_month, updated_at
+                        ) VALUES (
+                            CAST(:id AS uuid), CAST(:uid AS uuid),
+                            :score, 1000, :risk_level,
+                            '{}',
+                            CAST(:factors  AS jsonb),
+                            CAST(:insights AS jsonb),
+                            CAST(:actions  AS jsonb),
+                            :month, now()
+                        )
+                        """
+                    ),
+                    {
+                        "id":         new_id,
+                        "uid":        user_id,
+                        "score":      score,
+                        "risk_level": risk_label,
+                        "factors":    factors_j,
+                        "insights":   insights_j,
+                        "actions":    actions_j,
+                        "month":      month_start,
+                    },
+                )
+            except Exception:
+                # V2 columns absent — legacy INSERT
+                db.rollback()
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO cyber_card_scores (
+                            id, user_id, score, max_score, risk_level, signals, score_month
+                        ) VALUES (
+                            CAST(:id AS uuid), CAST(:uid AS uuid),
+                            :score, 1000, :risk_level, '{}', :month
+                        )
+                        """
+                    ),
+                    {"id": new_id, "uid": user_id, "score": score, "risk_level": risk_label, "month": month_start},
+                )
+
         db.commit()
         logger.info(
             "cyber_card_computed",
