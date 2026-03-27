@@ -315,7 +315,16 @@ def _compute_and_upsert(db: Session, user_id: str) -> None:
             "cyber_card_compute_failed",
             extra={"user_id": user_id, "error": str(e)},
         )
-        # Never raise — the endpoint handles a missing card gracefully
+        # ── CRITICAL: always rollback on failure ─────────────────────────────
+        # psycopg2 leaves the connection in InFailedSqlTransaction after any
+        # error.  Without an explicit rollback, EVERY subsequent query on this
+        # session (including the _get_cyber_card SELECT that follows) will also
+        # fail with "current transaction is aborted".  That produces the
+        # cyber_card_fetch_failed log seen in production.
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 def _get_cyber_card_history(db: Session, user_id: str) -> list[dict]:
@@ -378,6 +387,12 @@ def fetch_cyber_card(
         # Compute when card is absent or the cached score is stale (> 5 min)
         if card is None or _is_stale(card.get("updated_at"), now, _CACHE_TTL_SECONDS):
             _compute_and_upsert(db, user_id)
+            # _compute_and_upsert rolls back on failure, but call rollback here
+            # too so the session is guaranteed clean before the next SELECT.
+            try:
+                db.rollback()
+            except Exception:
+                pass
             card = _get_cyber_card(db, user_id)
 
     except SQLAlchemyError:
