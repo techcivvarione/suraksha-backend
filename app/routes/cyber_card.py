@@ -81,20 +81,48 @@ def _get_cyber_card(db: Session, user_id: str) -> dict | None:
     if not user:
         return None
 
-    row = db.execute(
-        text(
-            """
-            SELECT score, max_score, risk_level, signals,
-                   factors, insights, actions,
-                   score_month, updated_at
-            FROM cyber_card_scores
-            WHERE user_id = CAST(:uid AS uuid)
-            ORDER BY score_month DESC, updated_at DESC NULLS LAST
-            LIMIT 1
-            """
-        ),
-        {"uid": user_id},
-    ).mappings().first()
+    # Try the full V2 query first; gracefully fall back if the new columns
+    # haven't been added yet (migration pending on this environment).
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT score, max_score, risk_level, signals,
+                       factors, insights, actions,
+                       score_month, updated_at
+                FROM cyber_card_scores
+                WHERE user_id = CAST(:uid AS uuid)
+                ORDER BY score_month DESC, updated_at DESC NULLS LAST
+                LIMIT 1
+                """
+            ),
+            {"uid": user_id},
+        ).mappings().first()
+    except Exception:
+        # V2 columns not yet present — fall back to legacy schema
+        db.rollback()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT score, max_score, risk_level, signals,
+                           score_month,
+                           NULL::jsonb        AS factors,
+                           NULL::jsonb        AS insights,
+                           NULL::jsonb        AS actions,
+                           NULL::timestamptz  AS updated_at
+                    FROM cyber_card_scores
+                    WHERE user_id = CAST(:uid AS uuid)
+                    ORDER BY score_month DESC
+                    LIMIT 1
+                    """
+                ),
+                {"uid": user_id},
+            ).mappings().first()
+        except Exception:
+            logger.exception("cyber_card_read_failed", extra={"user_id": user_id})
+            return None
+
     if not row:
         return None
 
@@ -123,27 +151,29 @@ def _compute_and_upsert(db: Session, user_id: str) -> None:
     try:
         from app.services.cyber_card_scorer import calculate_cyber_score
 
-        # Debug: log scan counts so we can confirm persistence is working
+        # Debug: log per-type scan counts + eligibility so issues are obvious in logs
         try:
-            email_count = db.execute(
-                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid) AND scan_type = 'EMAIL'"),
+            type_rows = db.execute(
+                text(
+                    """
+                    SELECT UPPER(scan_type) AS st, COUNT(*) AS cnt
+                    FROM scan_history
+                    WHERE user_id = CAST(:uid AS uuid)
+                    GROUP BY UPPER(scan_type)
+                    """
+                ),
                 {"uid": user_id},
-            ).scalar() or 0
-            password_count = db.execute(
-                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid) AND scan_type = 'PASSWORD'"),
-                {"uid": user_id},
-            ).scalar() or 0
-            total_scans = db.execute(
-                text("SELECT COUNT(*) FROM scan_history WHERE user_id = CAST(:uid AS uuid)"),
-                {"uid": user_id},
-            ).scalar() or 0
+            ).mappings().all()
+            scan_types: dict = {r["st"]: r["cnt"] for r in type_rows}
+            distinct_count   = len(scan_types)
+            eligible         = distinct_count >= 2
             logger.info(
                 "cyber_card_debug",
                 extra={
-                    "user_id": user_id,
-                    "email_count": email_count,
-                    "password_count": password_count,
-                    "total_scans": total_scans,
+                    "user_id":        user_id,
+                    "scan_types":     scan_types,
+                    "distinct_count": distinct_count,
+                    "eligible":       eligible,
                 },
             )
         except Exception:
@@ -159,39 +189,62 @@ def _compute_and_upsert(db: Session, user_id: str) -> None:
             )
         ).scalar()
 
-        db.execute(
-            text(
-                """
-                INSERT INTO cyber_card_scores (
-                    id, user_id, score, max_score, risk_level,
-                    signals, factors, insights, actions,
-                    score_month, updated_at
-                )
-                VALUES (
-                    :id, CAST(:uid AS uuid), :score, 1000, :risk_level,
-                    '{}', CAST(:factors AS jsonb), CAST(:insights AS jsonb),
-                    CAST(:actions AS jsonb), :month, now()
-                )
-                ON CONFLICT (user_id, score_month) DO UPDATE SET
-                    score      = EXCLUDED.score,
-                    risk_level = EXCLUDED.risk_level,
-                    factors    = EXCLUDED.factors,
-                    insights   = EXCLUDED.insights,
-                    actions    = EXCLUDED.actions,
-                    updated_at = now()
-                """
-            ),
-            {
-                "id":         str(uuid.uuid4()),
-                "uid":        user_id,
-                "score":      score,
-                "risk_level": get_risk_level(score),
-                "factors":    json.dumps(result["factors"]),
-                "insights":   json.dumps(result["insights"]),
-                "actions":    json.dumps(result["actions"]),
-                "month":      month_start,
-            },
-        )
+        upsert_params = {
+            "id":         str(uuid.uuid4()),
+            "uid":        user_id,
+            "score":      score,
+            "risk_level": get_risk_level(score),
+            "factors":    json.dumps(result["factors"]),
+            "insights":   json.dumps(result["insights"]),
+            "actions":    json.dumps(result["actions"]),
+            "month":      month_start,
+        }
+
+        try:
+            # Full V2 upsert — requires migration 20260326_01 to have run
+            db.execute(
+                text(
+                    """
+                    INSERT INTO cyber_card_scores (
+                        id, user_id, score, max_score, risk_level,
+                        signals, factors, insights, actions,
+                        score_month, updated_at
+                    )
+                    VALUES (
+                        :id, CAST(:uid AS uuid), :score, 1000, :risk_level,
+                        '{}', CAST(:factors AS jsonb), CAST(:insights AS jsonb),
+                        CAST(:actions AS jsonb), :month, now()
+                    )
+                    ON CONFLICT (user_id, score_month) DO UPDATE SET
+                        score      = EXCLUDED.score,
+                        risk_level = EXCLUDED.risk_level,
+                        factors    = EXCLUDED.factors,
+                        insights   = EXCLUDED.insights,
+                        actions    = EXCLUDED.actions,
+                        updated_at = now()
+                    """
+                ),
+                upsert_params,
+            )
+        except Exception:
+            # V2 columns absent — fall back to legacy upsert
+            db.rollback()
+            db.execute(
+                text(
+                    """
+                    INSERT INTO cyber_card_scores (
+                        id, user_id, score, max_score, risk_level, signals, score_month
+                    )
+                    VALUES (
+                        :id, CAST(:uid AS uuid), :score, 1000, :risk_level, '{}', :month
+                    )
+                    ON CONFLICT (user_id, score_month) DO UPDATE SET
+                        score      = EXCLUDED.score,
+                        risk_level = EXCLUDED.risk_level
+                    """
+                ),
+                upsert_params,
+            )
         db.commit()
         logger.info(
             "cyber_card_computed",
@@ -260,7 +313,7 @@ def fetch_cyber_card(
     if not card:
         return CyberCardPendingResponse(
             card_status="PENDING",
-            message="Complete an email and password scan to generate your Cyber Card.",
+            message="Run a scan to start building your Cyber Safety Score.",
         )
 
     return CyberCardActiveResponse(

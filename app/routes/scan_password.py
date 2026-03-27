@@ -93,7 +93,7 @@ def scan_password(
                     "risk": str(result["risk_level"]).lower(),
                     "score": int(result["risk_score"]),
                     "reasons": json.dumps(result["reasons"]),
-                    "scan_type": ScanType.PASSWORD.value,
+                    "scan_type": ScanType.PASSWORD.value.lower(),
                 },
             )
             db.commit()

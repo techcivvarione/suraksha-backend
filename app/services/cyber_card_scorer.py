@@ -66,12 +66,14 @@ def calculate_cyber_score(db: Session, user_id: str) -> dict[str, Any]:
     factors:  dict[str, Any]  = {}
 
     # ── 1. Load scan history (last 30 days) ──────────────────────────────────
+    #    Normalize scan_type to UPPER so both "email" (new) and "EMAIL" (legacy)
+    #    are handled identically without needing a data migration.
 
     try:
         scan_rows = db.execute(
             text(
                 """
-                SELECT scan_type, risk, score AS scan_score, created_at
+                SELECT UPPER(scan_type) AS scan_type, risk, score AS scan_score, created_at
                 FROM scan_history
                 WHERE user_id = CAST(:uid AS uuid)
                   AND created_at >= :since
@@ -87,9 +89,10 @@ def calculate_cyber_score(db: Session, user_id: str) -> dict[str, Any]:
     def _risk(row) -> str:
         return str(row.get("risk") or "").lower()
 
+    # Type buckets (case-normalised via UPPER() in the query above)
     email_scans    = [r for r in scan_rows if r["scan_type"] == "EMAIL"]
     password_scans = [r for r in scan_rows if r["scan_type"] == "PASSWORD"]
-    threat_scans   = [r for r in scan_rows if r["scan_type"] == "THREAT"]
+    threat_scans   = [r for r in scan_rows if r["scan_type"] in ("THREAT", "TEXT")]
     qr_scans       = [r for r in scan_rows if r["scan_type"] == "QR"]
     image_scans    = [r for r in scan_rows if r["scan_type"] in ("REALITY_IMAGE", "IMAGE", "OCR")]
 
@@ -185,6 +188,7 @@ def calculate_cyber_score(db: Session, user_id: str) -> dict[str, Any]:
         "email_breaches_high": len(high_email),
         "email_breaches_medium": len(med_email),
         "weak_passwords": len(high_pw),
+        "medium_passwords": len(med_pw),
     }
 
     # =========================================================================
@@ -291,6 +295,7 @@ def calculate_cyber_score(db: Session, user_id: str) -> dict[str, Any]:
 
     # =========================================================================
     # COMPONENT D — ACTIVITY COVERAGE  (bonus 0–100)
+    #   Eligibility: COUNT(DISTINCT scan_type) >= 2
     # =========================================================================
 
     covered: set[str] = set()
@@ -341,6 +346,8 @@ def calculate_cyber_score(db: Session, user_id: str) -> dict[str, Any]:
         "bonus": act_bonus,
         "scan_types_covered": sorted(covered),
         "coverage_count": coverage_n,
+        # Eligibility signal: distinct scan types >= 2
+        "eligible": coverage_n >= 2,
     }
 
     # =========================================================================

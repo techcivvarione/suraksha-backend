@@ -114,7 +114,7 @@ def scan_email(
                     "risk": str(result["risk_level"]).lower(),
                     "score": int(result["risk_score"]),
                     "reasons": json.dumps(result["reasons"]),
-                    "scan_type": ScanType.EMAIL.value,
+                    "scan_type": ScanType.EMAIL.value.lower(),
                 },
             )
             db.commit()
