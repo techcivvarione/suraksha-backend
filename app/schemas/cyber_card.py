@@ -20,6 +20,9 @@ class CyberCardSignals(BaseModel):
 class CyberCardPendingResponse(BaseModel):
     card_status: Literal["PENDING"]
     message: str
+    # Eligibility signals — Android uses these to show the right copy
+    eligible: bool = False            # True when distinct scan types >= 2
+    distinct_scan_types: int = 0      # How many unique scan types the user has completed
 
 
 class CyberCardLockedResponse(BaseModel):

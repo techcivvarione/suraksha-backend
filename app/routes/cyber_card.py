@@ -145,39 +145,49 @@ def _get_cyber_card(db: Session, user_id: str) -> dict | None:
     }
 
 
+def _check_eligibility(db: Session, user_id: str) -> tuple[bool, int, list[str]]:
+    """Return (eligible, distinct_count, scan_types_list).
+
+    Eligible = COUNT(DISTINCT LOWER(scan_type)) >= 2.
+    Uses LOWER() so 'email', 'EMAIL', 'Email' are all counted as one type.
+    Never raises — returns (False, 0, []) on DB error.
+    """
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT LOWER(scan_type) AS st, COUNT(*) AS cnt
+                FROM scan_history
+                WHERE user_id = CAST(:uid AS uuid)
+                GROUP BY LOWER(scan_type)
+                """
+            ),
+            {"uid": user_id},
+        ).mappings().all()
+        type_map  = {r["st"]: int(r["cnt"]) for r in rows}
+        scan_types = sorted(type_map.keys())
+        distinct   = len(scan_types)
+        eligible   = distinct >= 2
+        logger.info(
+            "cyber_card_debug",
+            extra={
+                "user_id":        user_id,
+                "scan_types":     type_map,
+                "distinct_count": distinct,
+                "eligible":       eligible,
+            },
+        )
+        return eligible, distinct, scan_types
+    except Exception:
+        logger.exception("cyber_card_eligibility_failed", extra={"user_id": user_id})
+        return False, 0, []
+
+
 def _compute_and_upsert(db: Session, user_id: str) -> None:
     """Run the scoring engine for *user_id* and persist results.
     Never raises — caller checks the return value of _get_cyber_card instead."""
     try:
         from app.services.cyber_card_scorer import calculate_cyber_score
-
-        # Debug: log per-type scan counts + eligibility so issues are obvious in logs
-        try:
-            type_rows = db.execute(
-                text(
-                    """
-                    SELECT UPPER(scan_type) AS st, COUNT(*) AS cnt
-                    FROM scan_history
-                    WHERE user_id = CAST(:uid AS uuid)
-                    GROUP BY UPPER(scan_type)
-                    """
-                ),
-                {"uid": user_id},
-            ).mappings().all()
-            scan_types: dict = {r["st"]: r["cnt"] for r in type_rows}
-            distinct_count   = len(scan_types)
-            eligible         = distinct_count >= 2
-            logger.info(
-                "cyber_card_debug",
-                extra={
-                    "user_id":        user_id,
-                    "scan_types":     scan_types,
-                    "distinct_count": distinct_count,
-                    "eligible":       eligible,
-                },
-            )
-        except Exception:
-            pass  # debug log failure never blocks scoring
 
         result = calculate_cyber_score(db, user_id)
         score  = result["score"]
@@ -295,10 +305,27 @@ def fetch_cyber_card(
     user_id = str(current_user.id)
     now = datetime.now(timezone.utc)
 
+    # ── Step 1: Check eligibility (distinct scan types >= 2) ─────────────────
+    eligible, distinct_count, scan_types = _check_eligibility(db, user_id)
+
+    if not eligible:
+        # User hasn't done enough varied scans yet — tell them clearly
+        if distinct_count == 0:
+            msg = "Run your first scan to start building your Cyber Safety Score."
+        else:
+            msg = "Run one more type of scan (email, password, or message) to unlock your score."
+        return CyberCardPendingResponse(
+            card_status        = "PENDING",
+            message            = msg,
+            eligible           = False,
+            distinct_scan_types = distinct_count,
+        )
+
+    # ── Step 2: Eligible — fetch or compute score ─────────────────────────────
     try:
         card = _get_cyber_card(db, user_id)
 
-        # Recompute when card is absent or the cached score is stale
+        # Compute when card is absent or the cached score is stale (> 5 min)
         if card is None or _is_stale(card.get("updated_at"), now, _CACHE_TTL_SECONDS):
             _compute_and_upsert(db, user_id)
             card = _get_cyber_card(db, user_id)
@@ -306,14 +333,19 @@ def fetch_cyber_card(
     except SQLAlchemyError:
         logger.exception("cyber_card_fetch_failed", extra={"user_id": user_id})
         return CyberCardPendingResponse(
-            card_status="PENDING",
-            message="Your Cyber Card will be available after completing required security scans.",
+            card_status        = "PENDING",
+            message            = "Your score is being prepared. Please try again in a moment.",
+            eligible           = True,
+            distinct_scan_types = distinct_count,
         )
 
     if not card:
+        # Eligible but compute failed silently — show "preparing" not "no scans"
         return CyberCardPendingResponse(
-            card_status="PENDING",
-            message="Run a scan to start building your Cyber Safety Score.",
+            card_status        = "PENDING",
+            message            = "Your Cyber Safety Score is being prepared. Please wait a moment.",
+            eligible           = True,
+            distinct_scan_types = distinct_count,
         )
 
     return CyberCardActiveResponse(
