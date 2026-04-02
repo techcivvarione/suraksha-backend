@@ -8,9 +8,9 @@ SUPPORTED_LANGUAGES = {"en", "hi", "te", "ta"}
 
 EXPLANATION_TEMPLATES: dict[str, dict[str, str]] = {
     "en": {
-        "HIGH_VERDICT": "⚠️ This is likely a scam. Do not trust this.",
-        "MOD_VERDICT": "⚠️ This looks suspicious. Be careful.",
-        "LOW_VERDICT": "✅ This looks safe.",
+        "HIGH_VERDICT": "HIGH RISK - Likely scam. Do not trust this.",
+        "MOD_VERDICT": "MODERATE RISK - This looks suspicious.",
+        "LOW_VERDICT": "LOW RISK - This looks safe.",
         "ACTION_HIGH": "Do not click, pay, reply, or share details.",
         "ACTION_MOD": "Check with the sender before taking action.",
         "ACTION_LOW": "Still stay alert for anything unusual.",
@@ -19,9 +19,9 @@ EXPLANATION_TEMPLATES: dict[str, dict[str, str]] = {
         "DEFAULT_LOW_WHY": "No major risk was found.",
     },
     "hi": {
-        "HIGH_VERDICT": "⚠️ यह धोखाधड़ी हो सकती है। इस पर भरोसा न करें।",
-        "MOD_VERDICT": "⚠️ यह संदिग्ध लगता है। सावधान रहें।",
-        "LOW_VERDICT": "✅ यह सुरक्षित लगता है।",
+        "HIGH_VERDICT": "उच्च जोखिम - यह धोखाधड़ी हो सकती है। इस पर भरोसा न करें।",
+        "MOD_VERDICT": "मध्यम जोखिम - यह संदिग्ध लगता है।",
+        "LOW_VERDICT": "कम जोखिम - यह सुरक्षित लगता है।",
         "ACTION_HIGH": "कोई लिंक न खोलें, पैसे न भेजें, जानकारी साझा न करें।",
         "ACTION_MOD": "पहले जांच करें, फिर आगे बढ़ें।",
         "ACTION_LOW": "फिर भी किसी भी अजीब चीज़ पर ध्यान रखें।",
@@ -30,9 +30,9 @@ EXPLANATION_TEMPLATES: dict[str, dict[str, str]] = {
         "DEFAULT_LOW_WHY": "कोई बड़ा खतरा नहीं मिला।",
     },
     "te": {
-        "HIGH_VERDICT": "⚠️ ఇది మోసం అయ్యే అవకాశం ఉంది. దీనిని నమ్మవద్దు.",
-        "MOD_VERDICT": "⚠️ ఇది అనుమానాస్పదంగా ఉంది. జాగ్రత్తగా ఉండండి.",
-        "LOW_VERDICT": "✅ ఇది సురక్షితంగా కనిపిస్తోంది.",
+        "HIGH_VERDICT": "అధిక ప్రమాదం - ఇది మోసం అయ్యే అవకాశం ఉంది. దీనిని నమ్మవద్దు.",
+        "MOD_VERDICT": "మధ్యస్థ ప్రమాదం - ఇది అనుమానాస్పదంగా ఉంది.",
+        "LOW_VERDICT": "తక్కువ ప్రమాదం - ఇది సురక్షితంగా కనిపిస్తోంది.",
         "ACTION_HIGH": "లింక్ నొక్కవద్దు, డబ్బు పంపవద్దు, వివరాలు పంచవద్దు.",
         "ACTION_MOD": "ముందు నిజమా చూడండి. తర్వాత మాత్రమే చర్య తీసుకోండి.",
         "ACTION_LOW": "అయినా కూడా ఏదైనా వింతగా ఉంటే జాగ్రత్తగా ఉండండి.",
@@ -41,9 +41,9 @@ EXPLANATION_TEMPLATES: dict[str, dict[str, str]] = {
         "DEFAULT_LOW_WHY": "పెద్ద ప్రమాదం కనిపించలేదు.",
     },
     "ta": {
-        "HIGH_VERDICT": "⚠️ இது மோசடியாக இருக்கலாம். இதை நம்பாதீர்கள்.",
-        "MOD_VERDICT": "⚠️ இது சந்தேகமாக தெரிகிறது. கவனமாக இருங்கள்.",
-        "LOW_VERDICT": "✅ இது பாதுகாப்பாக தெரிகிறது.",
+        "HIGH_VERDICT": "அதிக ஆபத்து - இது மோசடியாக இருக்கலாம். இதை நம்பாதீர்கள்.",
+        "MOD_VERDICT": "மிதமான ஆபத்து - இது சந்தேகமாக தெரிகிறது.",
+        "LOW_VERDICT": "குறைந்த ஆபத்து - இது பாதுகாப்பாக தெரிகிறது.",
         "ACTION_HIGH": "எந்த இணைப்பையும் திறக்காதீர்கள், பணம் அனுப்பாதீர்கள், தகவல் பகிராதீர்கள்.",
         "ACTION_MOD": "முதலில் சரிபார்க்கவும். பிறகு மட்டும் செயல்படவும்.",
         "ACTION_LOW": "இருந்தாலும் ஏதாவது வித்தியாசமாக இருந்தால் கவனமாக இருங்கள்.",

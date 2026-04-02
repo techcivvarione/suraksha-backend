@@ -10,7 +10,7 @@ def test_high_risk_apk_explanation_is_direct():
         ],
     )
 
-    assert result.startswith("⚠️ This is likely a scam.")
+    assert result.startswith("HIGH RISK - Likely scam.")
     assert "install an app from a link" in result
     assert "tries to rush you" in result
     assert result.endswith("Do not click, pay, reply, or share details.")
@@ -24,7 +24,7 @@ def test_high_risk_otp_explanation_never_calls_it_safe():
 
     assert "looks safe" not in result.lower()
     assert "otp" in result.lower()
-    assert result.split("\n\n")[0] == "⚠️ This is likely a scam. Do not trust this."
+    assert result.split("\n\n")[0] == "HIGH RISK - Likely scam. Do not trust this."
 
 
 def test_medium_risk_explanation_stays_cautious():
@@ -34,7 +34,7 @@ def test_medium_risk_explanation_stays_cautious():
     )
 
     parts = result.split("\n\n")
-    assert parts[0] == "⚠️ This looks suspicious. Be careful."
+    assert parts[0] == "MODERATE RISK - This looks suspicious."
     assert "suspicious link" in parts[1].lower()
     assert parts[2] == "Check with the sender before taking action."
 
@@ -46,7 +46,7 @@ def test_low_risk_explanation_stays_reassuring():
     )
 
     parts = result.split("\n\n")
-    assert parts[0] == "✅ This looks safe."
+    assert parts[0] == "LOW RISK - This looks safe."
     assert parts[1] == "No major risk was found."
     assert parts[2] == "Still stay alert for anything unusual."
 
@@ -82,4 +82,4 @@ def test_unknown_language_falls_back_to_english():
         language="xx",
     )
 
-    assert result.startswith("✅ This looks safe.")
+    assert result.startswith("LOW RISK - This looks safe.")
