@@ -56,6 +56,7 @@ def explain_scan(
         score=resolved_score,
         reasons=resolved_reasons,
         text=payload.text,
+        language=payload.language,
     )
     return ExplainScanResponse(scan_id=payload.scan_id or str(uuid.uuid4()), ai_explanation=explanation)
 

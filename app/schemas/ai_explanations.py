@@ -8,6 +8,7 @@ class ExplainScanRequest(BaseModel):
 
     scan_id: str | None = None
     text: str | None = None
+    language: str = "en"
 
 
 class ExplainScanResponse(BaseModel):
