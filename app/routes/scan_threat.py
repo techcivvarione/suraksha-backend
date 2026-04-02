@@ -65,6 +65,10 @@ def scan_threat(
                 reasons=result.get("reasons"),
                 recommendation=result.get("recommendation"),
                 confidence=float(result.get("confidence") or 0.0),
+                summary=result.get("explanation") or result.get("summary"),
+                signals=result.get("signals"),
+                detected_type=result.get("detected_type"),
+                is_flagged=bool(result.get("is_scam_likely")),
                 scan_id=scan_id,
             )
         )

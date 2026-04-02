@@ -1,41 +1,27 @@
 from __future__ import annotations
 
-KEYWORD_WEIGHTS = {
-    'otp': 20,
-    'kyc': 18,
-    'account blocked': 18,
-    'verify immediately': 16,
-    'bank update': 14,
-    'click link': 14,
-    'urgent': 8,
-    'suspend': 10,
-}
+from app.services.threat.threat_analyzer import analyze_threat
 
 
 def analyze_message_text(message_text: str) -> dict:
-    text = (message_text or '').strip().lower()
-    score = 0
-    matched: list[str] = []
-    for keyword, weight in KEYWORD_WEIGHTS.items():
-        if keyword in text:
-            score += weight
-            matched.append(keyword)
-    if 'http://' in text or 'https://' in text or 'www.' in text:
-        score += 12
-        matched.append('suspicious_link')
-    score = max(0, min(100, score))
-    if score >= 70:
-        classification = 'phishing_suspected'
-        reason = 'Bank impersonation pattern detected' if any(k in matched for k in ('otp', 'kyc', 'bank update')) else 'Suspicious urgency and link pattern detected'
+    result = analyze_threat(message_text)
+    score = int(result["risk_score"])
+    risk_level = str(result.get("risk_level") or "").upper()
+
+    if risk_level == "HIGH" or score >= 70:
+        classification = "phishing_suspected"
     elif score >= 40:
-        classification = 'suspicious'
-        reason = 'Suspicious message patterns detected'
+        classification = "suspicious"
     else:
-        classification = 'unlikely_phishing'
-        reason = 'No strong phishing pattern detected'
+        classification = "unlikely_phishing"
+
+    explanation = result.get("explanation") or result.get("summary") or "No strong phishing pattern detected"
+    signals = result.get("signals") or result.get("reasons") or []
+
     return {
-        'risk_score': score,
-        'classification': classification,
-        'reason': reason,
-        'matched_keywords': matched,
+        "risk_score": score,
+        "classification": classification,
+        "reason": explanation,
+        "matched_keywords": signals,
+        "detected_type": result.get("detected_type"),
     }

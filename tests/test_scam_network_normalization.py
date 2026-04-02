@@ -16,3 +16,4 @@ def test_message_detection_flags_bank_impersonation():
     result = analyze_message_text('Your bank KYC will expire today. Click link to verify immediately.')
     assert result['risk_score'] >= 70
     assert result['classification'] == 'phishing_suspected'
+    assert 'KYC' in result['reason'] or 'bank' in result['reason'].lower()

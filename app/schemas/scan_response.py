@@ -15,6 +15,7 @@ class ScanResponse(BaseModel):
     confidence: Optional[float] = None
     reasons: List[str]
     recommendation: str
+    summary: Optional[str] = None
     ai_probability: Optional[float] = None
     risk: Optional[str] = None
     signals: Optional[List[str]] = None
