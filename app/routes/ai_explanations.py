@@ -1,4 +1,5 @@
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
@@ -10,6 +11,7 @@ from app.dependencies.access import require_feature
 from app.models.user import User
 from app.schemas.ai_explanations import ExplainScanRequest, ExplainScanResponse
 from app.services.ai_explainer import generate_ai_explanation
+from app.services.threat.threat_analyzer import analyze_threat
 
 router = APIRouter(prefix="/ai", tags=["AI Explanations"])
 
@@ -38,11 +40,36 @@ def explain_scan(
     if not scan and not payload.text:
         raise HTTPException(status_code=404, detail="Scan not found")
 
+    resolved_risk = scan["risk"] if scan else None
+    resolved_score = scan["score"] if scan else None
+    resolved_reasons = _coerce_scan_reasons(scan["reasons"] if scan else None)
+
+    if not scan and payload.text:
+        threat_result = analyze_threat(payload.text)
+        resolved_risk = threat_result.get("risk_level")
+        resolved_score = threat_result.get("risk_score")
+        resolved_reasons = threat_result.get("signals") or threat_result.get("reasons") or []
+
     explanation = generate_ai_explanation(
         scan_type="SECURITY_SCAN",
-        risk=scan["risk"] if scan else None,
-        score=scan["score"] if scan else None,
-        reasons=scan["reasons"] if scan else [],
+        risk=resolved_risk,
+        score=resolved_score,
+        reasons=resolved_reasons,
         text=payload.text,
     )
     return ExplainScanResponse(scan_id=payload.scan_id or str(uuid.uuid4()), ai_explanation=explanation)
+
+
+def _coerce_scan_reasons(raw_reasons):
+    if raw_reasons is None:
+        return []
+    if isinstance(raw_reasons, list):
+        return raw_reasons
+    if isinstance(raw_reasons, str):
+        try:
+            parsed = json.loads(raw_reasons)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            return [raw_reasons]
+    return []
