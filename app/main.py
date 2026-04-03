@@ -226,6 +226,7 @@ from app.routes.admin import router as admin_router
 from app.routes.search import router as search_router
 from app.routes.user_quota import router as user_quota_router
 from app.routes.secure_now import router as secure_now_router
+from app.routes.notifications import router as notifications_router
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -233,7 +234,7 @@ app.include_router(news_router)
 app.include_router(home_router)
 app.include_router(history_router)
 app.include_router(security_router)
-app.include_router(trusted_contacts_router)
+app.include_router(trusted_contacts_router, prefix="/contacts", tags=["Contacts"])
 app.include_router(trusted_contacts_legacy_router)
 app.include_router(alerts_router)
 app.include_router(ai_router)
@@ -255,6 +256,7 @@ app.include_router(scan_threat_router)
 app.include_router(scan_image_router)
 app.include_router(devices_router)
 app.include_router(secure_now_router)
+app.include_router(notifications_router)
 app.include_router(billing_router)
 app.include_router(webhooks_router)
 app.include_router(admin_router)

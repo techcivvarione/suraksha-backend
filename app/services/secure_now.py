@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session
 
 
 SECURE_NOW_TEMPLATES: dict[str, tuple[str, str, str]] = {
-    "THREAT": ("SCAM_MESSAGE", "Ignore and delete message", "Do not reply, click links, or share details from this suspicious message."),
+    "THREAT": ("SCAM_MESSAGE", "Ignore scam message", "Do not reply, click links, or share details from this suspicious message."),
     "EMAIL": ("SCAM_EMAIL", "Ignore the suspicious email", "Do not open links or attachments. Verify through the official website or app."),
     "IMAGE": ("FAKE_MEDIA", "Do not trust this media", "Avoid forwarding or acting on this suspicious image or media result."),
     "QR": ("RISKY_QR", "Do not scan or pay via this QR", "Use the official merchant app or verify the payment handle before paying."),
-    "PASSWORD": ("WEAK_PASSWORD", "Change your password", "Create a strong, unique password and avoid reusing it anywhere else."),
+    "PASSWORD": ("WEAK_PASSWORD", "Change password", "Create a strong, unique password and avoid reusing it anywhere else."),
     "SOS": ("CYBER_SOS", "Start Cyber SOS now", "Contact your bank, block risky activity, and follow the urgent protection steps immediately."),
 }
 

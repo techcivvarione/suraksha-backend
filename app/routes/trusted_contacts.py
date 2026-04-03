@@ -13,10 +13,7 @@ from app.services.family_protection_access import FEATURE_TRUSTED_CONTACTS, chec
 from app.services.notification_service import NotificationService
 from app.services.security_plan_limits import get_contact_limit
 
-router = APIRouter(
-    prefix="/contacts/trusted",
-    tags=["Trusted Contacts"],
-)
+router = APIRouter(tags=["Contacts"])
 legacy_router = APIRouter(
     prefix="/trusted-contacts",
     tags=["Trusted Contacts"],
@@ -59,7 +56,7 @@ def _normalize_phone(value: str | None) -> str | None:
     return digits or None
 
 
-@router.post("/")
+@router.post("/trusted/")
 def add_trusted_contact(
     payload: TrustedContactCreate,
     db: Session = Depends(get_db),
@@ -147,7 +144,7 @@ def add_trusted_contact(
     return {"status": "trusted_contact_added", "data": {"status": "trusted_contact_added"}}
 
 
-@router.get("/")
+@router.get("/trusted/")
 def list_trusted_contacts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -175,8 +172,7 @@ def list_trusted_contacts(
         {"uid": str(current_user.id)},
     ).mappings().all()
 
-    payload = {"count": len(rows), "data": rows}
-    return payload
+    return {"status": "success", "data": {"count": len(rows), "data": list(rows)}}
 
 
 @router.post("/invite")
@@ -508,7 +504,7 @@ def list_trusted_contacts_legacy(
     return list(rows)
 
 
-@router.delete("/{contact_id}")
+@router.delete("/trusted/{contact_id}")
 def deactivate_trusted_contact(
     contact_id: UUID = Path(...),
     db: Session = Depends(get_db),
@@ -570,7 +566,7 @@ def deactivate_trusted_contact(
     return {"status": "trusted_contact_deactivated", "data": {"status": "trusted_contact_deactivated"}}
 
 
-@router.patch("/{contact_id}/set-primary")
+@router.patch("/trusted/{contact_id}/set-primary")
 def set_primary_contact(
     contact_id: UUID = Path(...),
     db: Session = Depends(get_db),

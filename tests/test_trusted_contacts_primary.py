@@ -20,7 +20,7 @@ def test_first_contact_auto_primary(db_session, auth_user, client):
     data = client.get(
         "/contacts/trusted/",
         headers={"Authorization": f"Bearer {auth_user.token}"},
-    ).json()["data"]
+    ).json()["data"]["data"]
     assert any(item["is_primary"] for item in data)
 
 
@@ -29,7 +29,7 @@ def test_switch_primary(db_session, auth_user, client):
     contacts = client.get(
         "/contacts/trusted/",
         headers={"Authorization": f"Bearer {auth_user.token}"},
-    ).json()["data"]
+    ).json()["data"]["data"]
     target = contacts[1]["id"]
     resp = client.patch(
         f"/contacts/trusted/{target}/set-primary",
@@ -39,6 +39,6 @@ def test_switch_primary(db_session, auth_user, client):
     data = client.get(
         "/contacts/trusted/",
         headers={"Authorization": f"Bearer {auth_user.token}"},
-    ).json()["data"]
+    ).json()["data"]["data"]
     primaries = [c for c in data if c["is_primary"]]
     assert len(primaries) == 1 and primaries[0]["id"] == target
