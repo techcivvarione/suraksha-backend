@@ -13,8 +13,10 @@ from app.services.notification_service import NotificationService, NotificationE
 from app.services.security_plan_limits import (
     allows_automatic_trusted_alerts,
     allows_family_alerts,
+    allows_manual_trusted_alerts,
     normalized_plan,
 )
+from app.services.secure_now import create_secure_item_for_scan
 from app.services.trusted_alerts import notify_trusted_contacts
 
 logger = logging.getLogger(__name__)
@@ -112,7 +114,9 @@ def dispatch_plan_alerts(
     except NotificationError:
         push_result = {"delivered": 0}
 
-    if force_trusted or allows_automatic_trusted_alerts(plan):
+    should_dispatch_high_risk = int(risk_score or 0) >= 70
+
+    if should_dispatch_high_risk and (force_trusted and allows_manual_trusted_alerts(plan) or allows_automatic_trusted_alerts(plan)):
         trusted_result = notify_trusted_contacts(
             db=db,
             user_id=str(user.id),
@@ -121,7 +125,7 @@ def dispatch_plan_alerts(
             alert_event_id=alert_event_id,
         )
 
-    if allows_family_alerts(plan):
+    if should_dispatch_high_risk and allows_family_alerts(plan):
         family_result = notify_family_head(
             db=db,
             member_user_id=str(user.id),
@@ -179,6 +183,14 @@ def try_create_scan_alert(
         from app.services.alert_rate_limiter import enforce_alert_limits  # local import avoids circular
         enforce_alert_limits(db, str(user.id), client_ip, None,
                              plan=getattr(user, "plan", None))
+        if effective_score >= 70:
+            create_secure_item_for_scan(
+                db=db,
+                user_id=user.id,
+                analysis_type=analysis_type,
+                risk_score=effective_score,
+                source_scan_id=scan_id,
+            )
         event = create_alert_event(
             db=db,
             user_id=user.id,

@@ -2,6 +2,7 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -11,11 +12,21 @@ from app.routes.auth import get_current_user
 from app.schemas.alerts import MediaRiskAlertRequest, MediaRiskAlertResponse
 from app.services.alert_rate_limiter import AlertRateLimiterError, enforce_alert_limits
 from app.services.alert_validator import validate_recent_analysis, validate_request_payload
+from app.services.family_protection_access import FEATURE_MANUAL_ALERTS, check_feature_access
 from app.services.security_alerts import create_alert_event, dispatch_plan_alerts
 from app.services.security_plan_limits import allows_automatic_trusted_alerts, allows_family_alerts
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 logger = logging.getLogger(__name__)
+
+
+class ManualAlertTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default="Manual Protection Alert", min_length=3, max_length=120)
+    message: str = Field(default="A high-risk cyber event needs attention.", min_length=3, max_length=240)
+    risk_score: int = Field(default=90, ge=70, le=100)
+    alert_type: str = Field(default="MANUAL_HIGH_RISK_ALERT", min_length=3, max_length=64)
 
 
 @router.get("")
@@ -341,6 +352,50 @@ def trigger_media_alert(
         },
     )
     return MediaRiskAlertResponse(status="ALERT_SENT", message="Alert processed successfully.", dispatch=dispatch)
+
+
+@router.post("/manual-trigger")
+def trigger_manual_alert(
+    payload: ManualAlertTriggerRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db, use_cache=False),
+):
+    check_feature_access(current_user, FEATURE_MANUAL_ALERTS)
+    client_ip = request.client.host or "unknown"
+
+    try:
+        enforce_alert_limits(db, str(current_user.id), client_ip, None, plan=getattr(current_user, "plan", None))
+    except AlertRateLimiterError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
+    event = create_alert_event(
+        db=db,
+        user_id=current_user.id,
+        trigger_type=payload.alert_type,
+        analysis_type="MANUAL",
+        risk_score=int(payload.risk_score),
+        status="PENDING",
+        scan_type="MANUAL",
+        extra_signals={"title": payload.title, "message": payload.message, "manual": True},
+    )
+    dispatch = dispatch_plan_alerts(
+        db=db,
+        user=current_user,
+        trigger_type=payload.alert_type,
+        risk_score=int(payload.risk_score),
+        scan_id=None,
+        alert_event_id=event.id,
+        force_trusted=True,
+    )
+    event.status = "SENT"
+    db.add(event)
+    db.commit()
+    return {
+        "status": "manual_alert_sent",
+        "message": payload.message,
+        "dispatch": dispatch,
+    }
 
 
 def _build_alert_response(row) -> dict:

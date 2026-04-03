@@ -5,6 +5,7 @@ from app.schemas.scan_qr import QRScanRequest
 from app.services.qr.qr_analyzer import analyze_qr
 from app.services.response_builder import build_scan_response
 from app.services.scan_logger import log_scan_event
+from app.services.secure_now import create_secure_item_for_scan
 from app.enums.scan_type import ScanType
 import hashlib
 from sqlalchemy import text
@@ -85,5 +86,17 @@ def scan_qr(
         scan_type=ScanType.QR.value,
         risk_score=result["risk_score"],
     )
+
+    if int(result["risk_score"]) >= 70:
+        try:
+            create_secure_item_for_scan(
+                db=db,
+                user_id=current_user.id,
+                analysis_type=ScanType.QR.value,
+                risk_score=int(result["risk_score"]),
+                source_scan_id=scan_id,
+            )
+        except Exception:
+            pass
 
     return response

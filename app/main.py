@@ -225,6 +225,7 @@ from app.routes.webhooks import router as webhooks_router
 from app.routes.admin import router as admin_router
 from app.routes.search import router as search_router
 from app.routes.user_quota import router as user_quota_router
+from app.routes.secure_now import router as secure_now_router
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -253,6 +254,7 @@ app.include_router(scan_qr_router)
 app.include_router(scan_threat_router)
 app.include_router(scan_image_router)
 app.include_router(devices_router)
+app.include_router(secure_now_router)
 app.include_router(billing_router)
 app.include_router(webhooks_router)
 app.include_router(admin_router)

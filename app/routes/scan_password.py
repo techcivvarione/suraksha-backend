@@ -14,6 +14,7 @@ from app.services.password.password_analyzer import analyze_password
 from app.services.response_builder import build_scan_response
 from app.services.safe_response import safe_scan_response
 from app.services.scan_logger import log_scan_event
+from app.services.secure_now import create_secure_item_for_scan
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
 logger = logging.getLogger(__name__)
@@ -111,6 +112,18 @@ def scan_password(
                 },
             )
             # DB write failure must NOT break the scan response
+
+        if int(result["risk_score"]) >= 70:
+            try:
+                create_secure_item_for_scan(
+                    db=db,
+                    user_id=current_user.id,
+                    analysis_type=ScanType.PASSWORD.value,
+                    risk_score=int(result["risk_score"]),
+                    source_scan_id=scan_id,
+                )
+            except Exception:
+                logger.exception("secure_now_create_failed", extra={"user_id": str(current_user.id), "scan_type": ScanType.PASSWORD.value})
 
         return response
 

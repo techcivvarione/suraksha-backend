@@ -2,12 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.features import Feature
 from app.db import get_db
-from app.dependencies.access import require_feature
 from app.models.user import User
 from app.routes.auth import get_current_user
-from app.services.security_plan_limits import allows_family_alerts
+from app.services.family_protection_access import FEATURE_FAMILY_DASHBOARD, check_feature_access, get_family_protection_capabilities
+from app.services.security_plan_limits import allows_basic_family_dashboard, allows_family_alerts
 
 router = APIRouter(prefix="/family", tags=["Family Dashboard"])
 
@@ -17,8 +16,7 @@ def family_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not allows_family_alerts(current_user.plan):
-        raise HTTPException(status_code=403, detail="Family dashboard is available on GO_ULTRA only")
+    capabilities = check_feature_access(current_user, FEATURE_FAMILY_DASHBOARD)
 
     rows = db.execute(
         text(
@@ -32,14 +30,18 @@ def family_dashboard(
                 COUNT(*) FILTER (WHERE sh.risk = 'high') AS high_risk,
                 COUNT(*) FILTER (WHERE sh.risk = 'medium') AS medium_risk,
                 COUNT(*) FILTER (WHERE sh.risk = 'low') AS low_risk,
-                MAX(sh.created_at) AS last_scan_at
+                MAX(sh.created_at) AS last_scan_at,
+                COUNT(sni.id) FILTER (WHERE sni.status = 'PENDING') AS pending_secure_now
             FROM trusted_contacts tc
             JOIN users u
               ON u.id = tc.contact_user_id
             LEFT JOIN scan_history sh
               ON sh.user_id = u.id
+            LEFT JOIN secure_now_items sni
+              ON sni.user_id = u.id
             WHERE tc.owner_user_id = CAST(:uid AS uuid)
               AND tc.status = 'ACTIVE'
+              AND COALESCE(tc.family_link_enabled, true) = true
             GROUP BY u.id, u.name, u.email, u.phone_number
             ORDER BY last_scan_at DESC NULLS LAST
         """
@@ -93,29 +95,44 @@ def family_dashboard(
                     "low": row["low_risk"],
                 },
                 "total_scans": row["total_scans"],
+                "pending_secure_now": row["pending_secure_now"],
                 "last_scan_at": row["last_scan_at"],
                 "recent_alerts": alerts_by_member.get(str(row["user_id"]), [])[:5],
             }
         )
 
+    pending_invites = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM trusted_contact_invites
+            WHERE sender_user_id = CAST(:uid AS uuid)
+              AND status = 'PENDING'
+            """
+        ),
+        {"uid": str(current_user.id)},
+    ).scalar()
+
     return {
+        "capabilities": capabilities,
         "family_head": {
             "user_id": str(current_user.id),
             "name": current_user.name,
         },
         "members_count": len(members),
         "members": members,
-        "mode": "READ_ONLY",
+        "pending_invites_count": int(pending_invites or 0),
+        "mode": "FULL" if allows_family_alerts(current_user.plan) else "BASIC",
     }
 
 
 @router.get("/alerts")
 def family_alerts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_feature(Feature.FAMILY_ALERTS)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
+    if not allows_basic_family_dashboard(current_user.plan):
+        raise HTTPException(status_code=403, detail="Family alerts are available on GO_PRO and GO_ULTRA")
     rows = db.execute(
         text(
             """

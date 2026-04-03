@@ -16,11 +16,19 @@ def get_contact_limit(plan: str | None) -> int:
 
 
 def allows_automatic_trusted_alerts(plan: str | None) -> bool:
+    return normalized_plan(plan) == "GO_ULTRA"
+
+
+def allows_manual_trusted_alerts(plan: str | None) -> bool:
     return normalized_plan(plan) in {"GO_PRO", "GO_ULTRA"}
 
 
 def allows_family_alerts(plan: str | None) -> bool:
     return normalized_plan(plan) == "GO_ULTRA"
+
+
+def allows_basic_family_dashboard(plan: str | None) -> bool:
+    return normalized_plan(plan) in {"GO_PRO", "GO_ULTRA"}
 
 
 def allows_realtime_alerts(plan: str | None) -> bool:
