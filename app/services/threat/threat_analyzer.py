@@ -128,6 +128,43 @@ BRAND_DOMAINS = {
 SUSPICIOUS_SUFFIXES = (".top", ".xyz", ".click", ".live", ".shop", ".buzz", ".monster", ".loan")
 SHORTENERS = {"bit.ly", "t.co", "goo.gl", "tinyurl.com", "cutt.ly", "ow.ly", "rb.gy"}
 
+INSTALL_INTENT = (
+    "install",
+    "download",
+    "update app",
+    "install app",
+)
+
+ACTION_INTENT = (
+    "click",
+    "open",
+    "verify",
+    "update",
+    "confirm",
+)
+
+SENSITIVE_INTENT = (
+    "otp",
+    "pin",
+    "password",
+    "bank details",
+)
+
+FINANCIAL_KEYWORDS = (
+    "bank",
+    "upi",
+    "otp",
+)
+
+SCAM_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("kyc", "update"),
+    ("account", "blocked"),
+    ("install", "app"),
+    ("verify", "account"),
+    ("click", "link"),
+    ("collect", "upi"),
+)
+
 
 @dataclass(frozen=True)
 class ScanResult:
@@ -187,7 +224,23 @@ def analyze_threat(text: str) -> dict:
         signals.append(signal)
         category_weights[signal.category] = category_weights.get(signal.category, 0) + signal.weight
 
-    score = _compute_score(signals, hard_floor)
+    intent_signals = _intent_signals(lowered)
+    for signal in intent_signals:
+        signals.append(signal)
+        category_weights[signal.category] = category_weights.get(signal.category, 0) + signal.weight
+
+    grouped_signals = _grouped_pattern_signals(lowered)
+    for signal in grouped_signals:
+        signals.append(signal)
+        category_weights[signal.category] = category_weights.get(signal.category, 0) + signal.weight
+
+    escalation_floor, escalation_boosts = _india_specific_escalations(lowered)
+    hard_floor = max(hard_floor, escalation_floor)
+    for signal in escalation_boosts:
+        signals.append(signal)
+        category_weights[signal.category] = category_weights.get(signal.category, 0) + signal.weight
+
+    score = _compute_score(signals, hard_floor, lowered)
     risk_level = derive_risk_level_from_score(score)
     is_scam_likely = score >= 70 or hard_floor >= 85
     detected_type = _top_detected_type(category_weights)
@@ -351,6 +404,105 @@ def _context_signals(text: str, lowered: str, urls: list[str]) -> list[_Signal]:
     return _dedupe_signals(signals)
 
 
+def _intent_signals(lowered: str) -> list[_Signal]:
+    signals: list[_Signal] = []
+
+    if any(word in lowered for word in INSTALL_INTENT):
+        signals.append(
+            _Signal(
+                label="App installation request",
+                weight=40,
+                dangerous_why="Scam messages often push app downloads or updates to install harmful software outside trusted channels.",
+                category="install_intent",
+            )
+        )
+
+    if any(word in lowered for word in ACTION_INTENT):
+        signals.append(
+            _Signal(
+                label="User action requested",
+                weight=20,
+                dangerous_why="Scammers push users to click, verify, update, or confirm before they stop to verify the sender.",
+                category="action_intent",
+            )
+        )
+
+    if any(word in lowered for word in SENSITIVE_INTENT):
+        signals.append(
+            _Signal(
+                label="Sensitive data request",
+                weight=40,
+                dangerous_why="Requests for OTP, PIN, passwords, or bank details are a strong indicator of account takeover or payment fraud.",
+                category="sensitive_intent",
+            )
+        )
+
+    return signals
+
+
+def _grouped_pattern_signals(lowered: str) -> list[_Signal]:
+    signals: list[_Signal] = []
+    for p1, p2 in SCAM_PATTERNS:
+        if p1 in lowered and p2 in lowered:
+            signals.append(
+                _Signal(
+                    label=f"Suspicious pattern: {p1} + {p2}",
+                    weight=25,
+                    dangerous_why=f"The message combines {p1} with {p2}, which is a common scam flow used to trigger rushed trust or payment actions.",
+                    category="pattern_grouping",
+                )
+            )
+    return signals
+
+
+def _india_specific_escalations(lowered: str) -> tuple[int, list[_Signal]]:
+    floor = 0
+    signals: list[_Signal] = []
+
+    if "kyc" in lowered and ("install" in lowered or "download" in lowered):
+        floor = max(floor, 85)
+        signals.append(
+            _Signal(
+                label="KYC + app install scam pattern",
+                weight=35,
+                dangerous_why="Fake KYC notices combined with app downloads are a common Indian fraud technique used to install malicious apps and steal data.",
+                category="kyc_install_scam",
+            )
+        )
+
+    if "bank" in lowered and "update" in lowered:
+        signals.append(
+            _Signal(
+                label="Bank update request",
+                weight=30,
+                dangerous_why="Scam messages often pretend a bank update is required to push victims toward fake verification or malware links.",
+                category="bank_update_scam",
+            )
+        )
+
+    if "aadhaar" in lowered and "update" in lowered:
+        signals.append(
+            _Signal(
+                label="Aadhaar update request",
+                weight=30,
+                dangerous_why="Fraudsters frequently misuse Aadhaar update messages to collect identity data or redirect users to fake portals.",
+                category="aadhaar_update_scam",
+            )
+        )
+
+    if "account" in lowered and "blocked" in lowered:
+        signals.append(
+            _Signal(
+                label="Account blocked warning",
+                weight=30,
+                dangerous_why="Account blocked threats are widely used to pressure victims into fast, unsafe actions.",
+                category="account_blocked_scam",
+            )
+        )
+
+    return floor, signals
+
+
 def _brand_link_mismatch(lowered: str, host: str) -> _Signal | None:
     for brand, trusted_domains in BRAND_DOMAINS.items():
         if brand not in lowered:
@@ -375,7 +527,7 @@ def _hostname(url: str) -> str | None:
     return parsed.hostname
 
 
-def _compute_score(signals: list[_Signal], hard_floor: int) -> int:
+def _compute_score(signals: list[_Signal], hard_floor: int, lowered: str) -> int:
     if not signals:
         return 18
 
@@ -387,6 +539,22 @@ def _compute_score(signals: list[_Signal], hard_floor: int) -> int:
         score += 6
     if len(signals) >= 6:
         score += 6
+
+    if any(word in lowered for word in INSTALL_INTENT):
+        score = max(score, 50)
+
+    if "kyc" in lowered and "install" in lowered:
+        score = max(score, 85)
+
+    if any(word in lowered for word in FINANCIAL_KEYWORDS):
+        score = max(score, 80)
+
+    if (
+        any(word in lowered for word in INSTALL_INTENT)
+        or "kyc" in lowered
+        or any(word in lowered for word in FINANCIAL_KEYWORDS)
+    ) and score < 50:
+        score = 50
 
     score = max(score, hard_floor)
     return max(0, min(100, score))
@@ -410,6 +578,20 @@ def _build_explanation(signals: list[_Signal], urls: list[str], score: int, risk
     detected = "; ".join(signal.label for signal in top_signals)
     danger = " ".join(signal.dangerous_why for signal in top_signals[:2])
 
+    install_requested = any(signal.category in {"apk_install", "install_intent", "kyc_install_scam"} for signal in signals)
+    kyc_detected = any(signal.category in {"kyc_scam", "kyc_install_scam", "aadhaar_update_scam"} for signal in signals)
+    financial_detected = any(
+        signal.category in {
+            "otp_request",
+            "upi_collect",
+            "payment_panic",
+            "bank_impersonation",
+            "bank_update_scam",
+            "sensitive_intent",
+        }
+        for signal in signals
+    )
+
     if risk_level == "HIGH":
         action = "Do not click, install, pay, or share OTP or PIN details. Contact the bank, app, or service through its official app or helpline only."
     elif risk_level == "MEDIUM":
@@ -419,6 +601,26 @@ def _build_explanation(signals: list[_Signal], urls: list[str], score: int, risk
 
     if urls:
         action += " If you already opened the link, do not enter credentials or approve any UPI request."
+
+    if install_requested and kyc_detected:
+        return (
+            "This message asks you to install an app and mentions KYC update. "
+            "This is a common scam method used to install malicious apps and steal your data. "
+            "Do not install apps from unknown sources."
+        )
+
+    if financial_detected and install_requested:
+        return (
+            "This message combines a money or account-related request with an app install prompt. "
+            "That combination is strongly linked to banking and UPI fraud. "
+            "Do not install the app or follow the payment request."
+        )
+
+    if financial_detected:
+        return (
+            f"This message is {risk_level.lower()} risk because it asks for a sensitive financial action. "
+            f"{danger} {action}"
+        )
 
     return f"This message is {risk_level.lower()} risk because it shows {detected}. {danger} {action}"
 
@@ -458,6 +660,14 @@ def _signal_label(category: str) -> str:
         "job_scam": "Looks like a WhatsApp or Telegram job scam",
         "delivery_scam": "Looks like a fake delivery or parcel notice",
         "government_scheme_scam": "Impersonates a government scheme or ID update notice",
+        "install_intent": "Requests you to install or download an app",
+        "action_intent": "Pushes you to click, open, verify, update, or confirm",
+        "sensitive_intent": "Requests sensitive details such as OTP, PIN, password, or bank details",
+        "pattern_grouping": "Combines multiple suspicious scam actions in one message",
+        "kyc_install_scam": "Combines KYC language with an app installation request",
+        "bank_update_scam": "Uses a bank update request to trigger action",
+        "aadhaar_update_scam": "Uses an Aadhaar update request to trigger action",
+        "account_blocked_scam": "Warns that your account is blocked to pressure you",
     }
     return labels.get(category, category.replace("_", " ").title())
 

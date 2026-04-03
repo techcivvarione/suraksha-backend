@@ -38,3 +38,34 @@ def test_benign_message_remains_low_or_moderate():
 
     assert result["risk_level"] in {"LOW", "MEDIUM"}
     assert result["risk_score"] < 50
+
+
+def test_install_app_for_kyc_update_is_high_risk():
+    result = analyze_threat("install app for KYC update")
+
+    assert result["risk_level"] == "HIGH"
+    assert result["risk_score"] >= 85
+    assert any("KYC" in signal or "install" in signal.lower() for signal in result["signals"])
+
+
+def test_click_link_to_verify_bank_account_is_high_risk():
+    result = analyze_threat("click link to verify bank account")
+
+    assert result["risk_level"] == "HIGH"
+    assert result["risk_score"] >= 80
+    assert any("bank" in signal.lower() or "verify" in signal.lower() for signal in result["signals"])
+
+
+def test_download_app_to_get_reward_is_high_risk():
+    result = analyze_threat("download app to get reward")
+
+    assert result["risk_level"] == "HIGH"
+    assert result["risk_score"] >= 80
+    assert any("install" in signal.lower() or "reward" in signal.lower() for signal in result["signals"])
+
+
+def test_simple_hello_message_stays_low():
+    result = analyze_threat("hello how are you")
+
+    assert result["risk_level"] == "LOW"
+    assert result["risk_score"] < 50

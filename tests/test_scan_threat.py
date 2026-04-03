@@ -74,6 +74,34 @@ def test_safe_message(client, auth_token):
     assert data["risk_score"] <= 45
 
 
+def test_kyc_install_phrase_is_high_risk(client, auth_token):
+    msg = "install app for KYC update"
+    resp = client.post(
+        "/scan/threat",
+        headers={"Authorization": f"Bearer {auth_token}"},
+        json={"text": msg},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["risk_level"] == "HIGH"
+    assert data["risk_score"] >= 85
+
+
+def test_bank_verify_phrase_is_high_risk(client, auth_token):
+    msg = "click link to verify bank account"
+    resp = client.post(
+        "/scan/threat",
+        headers={"Authorization": f"Bearer {auth_token}"},
+        json={"text": msg},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["risk_level"] == "HIGH"
+    assert data["risk_score"] >= 80
+
+
 def test_suspicious_url(client, auth_token):
     msg = "Pay now at https://example.com/pay"
     resp = client.post(
