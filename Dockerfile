@@ -15,6 +15,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# ---------- Start FastAPI ----------
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
-
+# ---------- Run migrations, then start FastAPI ----------
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
