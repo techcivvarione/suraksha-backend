@@ -40,9 +40,9 @@ def derive_risk_level_from_score(score: int) -> str:
       61+   → HIGH
     """
     s = max(0, min(int(score or 0), 100))
-    if s <= 30:
+    if s <= 40:
         return "LOW"
-    if s <= 60:
+    if s <= 70:
         return "MEDIUM"
     return "HIGH"
 

@@ -26,3 +26,14 @@ class ScanResponse(BaseModel):
     is_flagged: Optional[bool] = None
     breach_count: Optional[int] = None
     breaches: Optional[list] = None
+    original_url: Optional[str] = None
+    final_url: Optional[str] = None
+    domain: Optional[str] = None
+    redirect_detected: Optional[bool] = None
+    redirect_chain: Optional[List[str]] = None
+    limited_analysis: Optional[bool] = None
+    risk_reason: Optional[List[str]] = None
+    confidence_score: Optional[int] = None
+    confidence_label: Optional[str] = None
+    simple_explanation: Optional[str] = None
+    detailed_explanation: Optional[str] = None
