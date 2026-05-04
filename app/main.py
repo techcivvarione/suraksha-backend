@@ -227,6 +227,7 @@ from app.routes.search import router as search_router
 from app.routes.user_quota import router as user_quota_router
 from app.routes.secure_now import router as secure_now_router
 from app.routes.notifications import router as notifications_router
+from app.routes.learning import router as learning_router
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -262,6 +263,7 @@ app.include_router(webhooks_router)
 app.include_router(admin_router)
 app.include_router(search_router)
 app.include_router(user_quota_router)
+app.include_router(learning_router)
 
 
 @app.get("/health")
