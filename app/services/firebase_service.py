@@ -4,8 +4,13 @@ import json
 import logging
 import os
 
-import firebase_admin
-from firebase_admin import credentials, messaging
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+except ImportError:  # pragma: no cover
+    firebase_admin = None
+    credentials = None
+    messaging = None
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +19,9 @@ firebase_app = None
 
 def get_firebase():
     global firebase_app
+
+    if firebase_admin is None or credentials is None:
+        raise RuntimeError("firebase_admin is not installed")
 
     if firebase_app is not None:
         return firebase_app
@@ -40,6 +48,8 @@ def send_push_notification(
     body: str,
     data: dict | None = None,
 ) -> str:
+    if messaging is None:
+        raise RuntimeError("firebase_admin is not installed")
     get_firebase()
     payload = {str(key): str(value) for key, value in (data or {}).items()}
     message = messaging.Message(token=token, notification=messaging.Notification(title=title, body=body), data=payload)

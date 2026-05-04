@@ -9,10 +9,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
+from app.db import engine
 from app.core.logging_setup import configure_logging
 from app.core.monitoring import init_sentry
 from app.middleware.security import SecurityLoggingMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.models.scam import Scam
 from app.services.firebase_service import send_push_notification
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -184,6 +186,12 @@ def startup():
     logger.info("startup_begin")
 
     try:
+        Scam.__table__.create(bind=engine, checkfirst=True)
+        logger.info("scams_table_ready")
+    except Exception:
+        logger.exception("scams_table_create_failed")
+
+    try:
         from app.services.news_ingestor import ingest_rss
 
         ingest_rss()
@@ -228,6 +236,7 @@ from app.routes.user_quota import router as user_quota_router
 from app.routes.secure_now import router as secure_now_router
 from app.routes.notifications import router as notifications_router
 from app.routes.learning import router as learning_router
+from app.routes.scams import router as scams_router
 
 app.include_router(auth_router)
 app.include_router(profile_router)
@@ -264,6 +273,7 @@ app.include_router(admin_router)
 app.include_router(search_router)
 app.include_router(user_quota_router)
 app.include_router(learning_router)
+app.include_router(scams_router)
 
 
 @app.get("/health")

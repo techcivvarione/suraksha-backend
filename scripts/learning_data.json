@@ -1,0 +1,2438 @@
+[
+{
+"title_en": "UPI Fraud",
+"title_hi": "यूपीआई धोखाधड़ी",
+"title_te": "యూపీఐ మోసం",
+"description_en": "Understand UPI fraud and how to stay safe while using payment apps.",
+"description_hi": "यूपीआई धोखाधड़ी को समझें और सुरक्षित रहें।",
+"description_te": "యూపీఐ మోసం ఎలా జరుగుతుందో తెలుసుకుని రక్షించుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "UPI fraud is when scammers trick you into sending money using apps like PhonePe, Google Pay, or Paytm.",
+"how_it_works": [
+"Scammer sends collect request instead of payment",
+"Pretends to be buyer or seller",
+"Asks you to enter UPI PIN to receive money",
+"Creates urgency or fear"
+],
+"warning_signs": [
+"Request to approve payment to receive money",
+"Unknown person contacting you",
+"Too good offers",
+"Urgent payment pressure"
+],
+"what_not_to_do": [
+"Do not enter PIN to receive money",
+"Do not accept unknown requests",
+"Do not trust screenshots",
+"Do not share PIN"
+],
+"how_to_stay_safe": [
+"Always verify payment requests",
+"Check sender details",
+"Use official apps only",
+"Enable app alerts"
+],
+"if_affected": [
+"Call bank immediately",
+"Dial 1930 helpline",
+"Block UPI",
+"Report on cybercrime.gov.in"
+]
+},
+"content_hi": {
+"what_is": "यूपीआई धोखाधड़ी में ठग आपको ऐप के जरिए पैसे भेजने के लिए धोखा देते हैं।",
+"how_it_works": [
+"नकली रिक्वेस्ट भेजते हैं",
+"खरीदार या विक्रेता बनते हैं",
+"PIN डालने को कहते हैं",
+"जल्दी का दबाव डालते हैं"
+],
+"warning_signs": [
+"पैसे पाने के लिए रिक्वेस्ट",
+"अजनबी संपर्क",
+"बहुत अच्छे ऑफर",
+"जल्दी करने का दबाव"
+],
+"what_not_to_do": [
+"PIN न डालें",
+"अनजान रिक्वेस्ट न लें",
+"स्क्रीनशॉट पर भरोसा न करें",
+"PIN साझा न करें"
+],
+"how_to_stay_safe": [
+"रिक्वेस्ट जांचें",
+"व्यक्ति जांचें",
+"आधिकारिक ऐप उपयोग करें",
+"अलर्ट चालू रखें"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"1930 पर कॉल करें",
+"UPI ब्लॉक करें",
+"ऑनलाइन रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "యూపీఐ మోసం అనేది యాప్‌ల ద్వారా మోసం చేసి డబ్బు పంపించుకోవడం.",
+"how_it_works": [
+"నకిలీ రిక్వెస్ట్ పంపిస్తారు",
+"కొనుగోలుదారుగా నటిస్తారు",
+"PIN అడుగుతారు",
+"త్వరగా చేయమని చెబుతారు"
+],
+"warning_signs": [
+"పేమెంట్ రిక్వెస్ట్",
+"తెలియని వ్యక్తి",
+"అధిక ఆఫర్లు",
+"త్వరగా ఒత్తిడి"
+],
+"what_not_to_do": [
+"PIN ఇవ్వవద్దు",
+"తెలియని రిక్వెస్ట్ అంగీకరించవద్దు",
+"స్క్రీన్‌షాట్ నమ్మవద్దు",
+"త్వరగా నిర్ణయం తీసుకోవద్దు"
+],
+"how_to_stay_safe": [
+"రిక్వెస్ట్ చెక్ చేయండి",
+"వ్యక్తిని ధృవీకరించండి",
+"అధికారిక యాప్ వాడండి",
+"నోటిఫికేషన్లు ఆన్ చేయండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"1930కి కాల్ చేయండి",
+"UPI బ్లాక్ చేయండి",
+"రిపోర్ట్ చేయండి"
+]
+}
+},
+{
+"title_en": "Phishing Attacks",
+"title_hi": "फिशिंग अटैक",
+"title_te": "ఫిషింగ్ దాడులు",
+"description_en": "Learn how phishing scams steal your data through fake links.",
+"description_hi": "जानें फिशिंग कैसे आपकी जानकारी चुराती है।",
+"description_te": "ఫిషింగ్ ద్వారా మీ డేటా ఎలా దొంగిలిస్తారో తెలుసుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "Phishing is when scammers send fake links or messages to steal your personal details.",
+"how_it_works": [
+"You get fake SMS/email",
+"Link looks real",
+"You enter login details",
+"Scammer steals data"
+],
+"warning_signs": [
+"Unknown sender",
+"Spelling mistakes",
+"Urgent warnings",
+"Strange links"
+],
+"what_not_to_do": [
+"Do not click unknown links",
+"Do not share passwords",
+"Do not download files",
+"Do not trust urgency"
+],
+"how_to_stay_safe": [
+"Check URL carefully",
+"Use official apps",
+"Enable 2FA",
+"Avoid public Wi-Fi"
+],
+"if_affected": [
+"Change passwords",
+"Inform bank",
+"Scan device",
+"Report phishing"
+]
+},
+"content_hi": {
+"what_is": "फिशिंग में नकली लिंक से आपकी जानकारी चुराई जाती है।",
+"how_it_works": [
+"नकली मैसेज मिलता है",
+"लिंक असली जैसा लगता है",
+"आप जानकारी डालते हैं",
+"ठग चुरा लेते हैं"
+],
+"warning_signs": [
+"अजनबी मैसेज",
+"गलत स्पेलिंग",
+"जल्दी का दबाव",
+"संदिग्ध लिंक"
+],
+"what_not_to_do": [
+"अनजान लिंक न खोलें",
+"पासवर्ड न दें",
+"फाइल डाउनलोड न करें",
+"जल्दी न करें"
+],
+"how_to_stay_safe": [
+"URL जांचें",
+"आधिकारिक ऐप उपयोग करें",
+"2FA चालू करें",
+"पब्लिक Wi-Fi से बचें"
+],
+"if_affected": [
+"पासवर्ड बदलें",
+"बैंक को बताएं",
+"फोन स्कैन करें",
+"रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "ఫిషింగ్ అనేది నకిలీ లింక్‌ల ద్వారా మీ సమాచారం దొంగిలించడం.",
+"how_it_works": [
+"నకిలీ మెసేజ్ వస్తుంది",
+"లింక్ నిజంగా కనిపిస్తుంది",
+"మీరు వివరాలు ఇస్తారు",
+"దొంగిలిస్తారు"
+],
+"warning_signs": [
+"తెలియని పంపినవారు",
+"తప్పు స్పెల్లింగ్",
+"త్వరగా ఒత్తిడి",
+"సందేహాస్పద లింక్"
+],
+"what_not_to_do": [
+"తెలియని లింక్ క్లిక్ చేయవద్దు",
+"పాస్‌వర్డ్ ఇవ్వవద్దు",
+"ఫైల్ డౌన్‌లోడ్ చేయవద్దు",
+"త్వరపడవద్దు"
+],
+"how_to_stay_safe": [
+"URL చెక్ చేయండి",
+"అధికారిక యాప్ వాడండి",
+"2FA ఆన్ చేయండి",
+"పబ్లిక్ Wi-Fi ఉపయోగించవద్దు"
+],
+"if_affected": [
+"పాస్‌వర్డ్ మార్చండి",
+"బ్యాంక్‌కు చెప్పండి",
+"డివైస్ స్కాన్ చేయండి",
+"రిపోర్ట్ చేయండి"
+]
+}
+},
+{
+"title_en": "OTP Scams",
+"title_hi": "ओटीपी धोखाधड़ी",
+"title_te": "ఓటీపీ మోసం",
+"description_en": "Know how OTP scams work and how to avoid sharing your OTP.",
+"description_hi": "जानें OTP धोखाधड़ी से कैसे बचें।",
+"description_te": "OTP మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "OTP scams happen when scammers trick you into sharing your one-time password.",
+"how_it_works": [
+"Scammer calls pretending bank/support",
+"Asks for OTP",
+"Uses OTP to complete transaction",
+"Money gets deducted"
+],
+"warning_signs": [
+"Call asking OTP",
+"Urgent request",
+"Fake bank identity",
+"Threat messages"
+],
+"what_not_to_do": [
+"Never share OTP",
+"Do not trust unknown calls",
+"Do not panic",
+"Do not follow instructions blindly"
+],
+"how_to_stay_safe": [
+"Keep OTP private",
+"Verify caller",
+"Use official support",
+"Enable alerts"
+],
+"if_affected": [
+"Call bank immediately",
+"Block account",
+"Report to 1930",
+"File complaint"
+]
+},
+"content_hi": {
+"what_is": "OTP धोखाधड़ी में ठग आपसे OTP लेकर पैसे निकाल लेते हैं।",
+"how_it_works": [
+"ठग कॉल करता है",
+"OTP मांगता है",
+"ट्रांजैक्शन करता है",
+"पैसे कट जाते हैं"
+],
+"warning_signs": [
+"OTP मांगने वाला कॉल",
+"जल्दी का दबाव",
+"बैंक बनकर कॉल",
+"डराने वाले मैसेज"
+],
+"what_not_to_do": [
+"OTP न दें",
+"अनजान कॉल पर भरोसा न करें",
+"घबराएं नहीं",
+"बिना सोचे न करें"
+],
+"how_to_stay_safe": [
+"OTP गुप्त रखें",
+"कॉलर जांचें",
+"आधिकारिक सपोर्ट लें",
+"अलर्ट चालू रखें"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"अकाउंट ब्लॉक करें",
+"1930 पर रिपोर्ट करें",
+"शिकायत दर्ज करें"
+]
+},
+"content_te": {
+"what_is": "OTP మోసం అనేది OTP చెప్పించుకుని డబ్బు దోచుకోవడం.",
+"how_it_works": [
+"కాల్ చేస్తారు",
+"OTP అడుగుతారు",
+"ట్రాన్సాక్షన్ చేస్తారు",
+"డబ్బు పోతుంది"
+],
+"warning_signs": [
+"OTP అడిగే కాల్",
+"త్వరగా ఒత్తిడి",
+"బ్యాంక్‌గా నటించడం",
+"భయపెట్టడం"
+],
+"what_not_to_do": [
+"OTP ఇవ్వవద్దు",
+"తెలియని కాల్ నమ్మవద్దు",
+"భయపడవద్దు",
+"త్వరగా చేయవద్దు"
+],
+"how_to_stay_safe": [
+"OTP రహస్యంగా ఉంచండి",
+"కాల్ ధృవీకరించండి",
+"అధికారిక సపోర్ట్ వాడండి",
+"అలర్ట్స్ ఆన్ చేయండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"అకౌంట్ బ్లాక్ చేయండి",
+"1930కి రిపోర్ట్ చేయండి",
+"ఫిర్యాదు చేయండి"
+]
+}
+},
+{
+"title_en": "Banking Fraud",
+"title_hi": "बैंकिंग धोखाधड़ी",
+"title_te": "బ్యాంకింగ్ మోసం",
+"description_en": "Learn common banking frauds and how to protect your money.",
+"description_hi": "बैंकिंग धोखाधड़ी से बचने के तरीके जानें।",
+"description_te": "బ్యాంకింగ్ మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "Banking fraud involves unauthorized access to your bank account to steal money.",
+"how_it_works": [
+"Scammer gains your details",
+"Accesses your account",
+"Transfers money",
+"Deletes alerts"
+],
+"warning_signs": [
+"Unknown transactions",
+"SMS alerts",
+"Account access issues",
+"Unexpected calls"
+],
+"what_not_to_do": [
+"Do not share bank details",
+"Do not ignore alerts",
+"Do not reuse passwords",
+"Do not delay reporting"
+],
+"how_to_stay_safe": [
+"Use strong passwords",
+"Enable SMS alerts",
+"Monitor account regularly",
+"Use official apps"
+],
+"if_affected": [
+"Contact bank",
+"Block account",
+"Report fraud",
+"Check statements"
+]
+},
+"content_hi": {
+"what_is": "बैंकिंग धोखाधड़ी में आपके अकाउंट से पैसे चोरी होते हैं।",
+"how_it_works": [
+"जानकारी चुरा लेते हैं",
+"अकाउंट एक्सेस करते हैं",
+"पैसे ट्रांसफर करते हैं",
+"अलर्ट हटाते हैं"
+],
+"warning_signs": [
+"अज्ञात ट्रांजैक्शन",
+"SMS अलर्ट",
+"लॉगिन समस्या",
+"अचानक कॉल"
+],
+"what_not_to_do": [
+"जानकारी साझा न करें",
+"अलर्ट नजरअंदाज न करें",
+"पासवर्ड दोहराएं नहीं",
+"देरी न करें"
+],
+"how_to_stay_safe": [
+"मजबूत पासवर्ड रखें",
+"SMS चालू रखें",
+"अकाउंट जांचें",
+"आधिकारिक ऐप उपयोग करें"
+],
+"if_affected": [
+"बैंक को बताएं",
+"अकाउंट ब्लॉक करें",
+"रिपोर्ट करें",
+"स्टेटमेंट देखें"
+]
+},
+"content_te": {
+"what_is": "బ్యాంకింగ్ మోసం అనేది మీ అకౌంట్ నుండి డబ్బు దోచుకోవడం.",
+"how_it_works": [
+"వివరాలు దొంగిలిస్తారు",
+"అకౌంట్‌లోకి ప్రవేశిస్తారు",
+"డబ్బు ట్రాన్స్‌ఫర్ చేస్తారు",
+"అలర్ట్స్ తొలగిస్తారు"
+],
+"warning_signs": [
+"తెలియని ట్రాన్సాక్షన్",
+"SMS అలర్ట్స్",
+"లాగిన్ సమస్య",
+"అనుకోని కాల్స్"
+],
+"what_not_to_do": [
+"వివరాలు ఇవ్వవద్దు",
+"అలర్ట్స్ నిర్లక్ష్యం చేయవద్దు",
+"పాస్‌వర్డ్ మళ్లీ వాడవద్దు",
+"ఆలస్యం చేయవద్దు"
+],
+"how_to_stay_safe": [
+"బలమైన పాస్‌వర్డ్ వాడండి",
+"SMS అలర్ట్స్ ఆన్ చేయండి",
+"అకౌంట్ చెక్ చేయండి",
+"అధికారిక యాప్ వాడండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు చెప్పండి",
+"అకౌంట్ బ్లాక్ చేయండి",
+"రిపోర్ట్ చేయండి",
+"స్టేట్మెంట్ చూడండి"
+]
+}
+}
+]
+
+[
+{
+"title_en": "Fake Customer Care Scams",
+"title_hi": "नकली कस्टमर केयर धोखाधड़ी",
+"title_te": "నకిలీ కస్టమర్ కేర్ మోసం",
+"description_en": "Learn how fake customer care scams trick people and how to stay safe.",
+"description_hi": "जानें नकली कस्टमर केयर धोखाधड़ी से कैसे बचें।",
+"description_te": "నకిలీ కస్టమర్ కేర్ మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "Scammers pretend to be customer care agents from banks, apps, or services to steal your money or data.",
+"how_it_works": [
+"You search a helpline number online",
+"Fake number appears on top results",
+"Scammer pretends to help",
+"They ask for OTP, PIN, or screen access",
+"They misuse your details"
+],
+"warning_signs": [
+"Number found on random websites",
+"Asks for OTP or PIN",
+"Requests screen sharing",
+"Talks with urgency or threats"
+],
+"what_not_to_do": [
+"Do not call random numbers from search",
+"Do not share OTP or PIN",
+"Do not install apps they suggest",
+"Do not allow screen sharing"
+],
+"how_to_stay_safe": [
+"Use official website/app for contact",
+"Verify numbers from trusted sources",
+"Never share sensitive details",
+"End call if suspicious"
+],
+"if_affected": [
+"Call bank immediately",
+"Block account access",
+"Report to 1930",
+"Raise complaint online"
+]
+},
+"content_hi": {
+"what_is": "ठग कस्टमर केयर बनकर आपकी जानकारी या पैसा चुरा लेते हैं।",
+"how_it_works": [
+"आप ऑनलाइन नंबर खोजते हैं",
+"नकली नंबर मिलता है",
+"ठग मदद करने का नाटक करता है",
+"OTP या PIN मांगता है",
+"जानकारी का गलत उपयोग करता है"
+],
+"warning_signs": [
+"गूगल पर मिला नंबर",
+"OTP या PIN मांगना",
+"स्क्रीन शेयरिंग मांगना",
+"जल्दी का दबाव"
+],
+"what_not_to_do": [
+"अनजान नंबर पर कॉल न करें",
+"OTP या PIN न दें",
+"कोई ऐप इंस्टॉल न करें",
+"स्क्रीन शेयर न करें"
+],
+"how_to_stay_safe": [
+"आधिकारिक साइट से नंबर लें",
+"नंबर सत्यापित करें",
+"संवेदनशील जानकारी न दें",
+"संदेह होने पर कॉल काटें"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"अकाउंट ब्लॉक करें",
+"1930 पर रिपोर्ट करें",
+"ऑनलाइन शिकायत करें"
+]
+},
+"content_te": {
+"what_is": "నకిలీ కస్టమర్ కేర్‌గా నటించి మీ డబ్బు లేదా వివరాలు దోచుకుంటారు.",
+"how_it_works": [
+"మీరు నంబర్ ఆన్‌లైన్‌లో వెతుకుతారు",
+"నకిలీ నంబర్ కనిపిస్తుంది",
+"సహాయం చేస్తున్నట్టు నటిస్తారు",
+"OTP లేదా PIN అడుగుతారు",
+"వాటిని దుర్వినియోగం చేస్తారు"
+],
+"warning_signs": [
+"గూగుల్‌లో వచ్చిన నంబర్",
+"OTP లేదా PIN అడగడం",
+"స్క్రీన్ షేర్ అడగడం",
+"త్వరగా ఒత్తిడి"
+],
+"what_not_to_do": [
+"తెలియని నంబర్‌కు కాల్ చేయవద్దు",
+"OTP లేదా PIN ఇవ్వవద్దు",
+"అజ్ఞాత యాప్ ఇన్‌స్టాల్ చేయవద్దు",
+"స్క్రీన్ షేర్ చేయవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక సైట్ వాడండి",
+"నంబర్ చెక్ చేయండి",
+"సున్నితమైన వివరాలు ఇవ్వవద్దు",
+"సందేహం ఉంటే కాల్ కట్ చేయండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"అకౌంట్ బ్లాక్ చేయండి",
+"1930కి రిపోర్ట్ చేయండి",
+"ఫిర్యాదు చేయండి"
+]
+}
+},
+{
+"title_en": "WhatsApp Scams",
+"title_hi": "व्हाट्सएप धोखाधड़ी",
+"title_te": "వాట్సాప్ మోసాలు",
+"description_en": "Understand common WhatsApp scams and how to avoid them.",
+"description_hi": "व्हाट्सएप धोखाधड़ी से बचने के तरीके जानें।",
+"description_te": "వాట్సాప్ మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "WhatsApp scams are fraud messages or calls that trick you into sharing money or personal details.",
+"how_it_works": [
+"Scammer sends message pretending friend/family",
+"Asks for urgent money",
+"Sends fake links",
+"Shares OTP scam links"
+],
+"warning_signs": [
+"Unknown number messaging",
+"Urgent money request",
+"Strange links",
+"Profile photo looks fake"
+],
+"what_not_to_do": [
+"Do not send money without verifying",
+"Do not click unknown links",
+"Do not share OTP",
+"Do not trust forwarded messages"
+],
+"how_to_stay_safe": [
+"Call person to verify",
+"Enable two-step verification",
+"Block unknown numbers",
+"Report suspicious chats"
+],
+"if_affected": [
+"Inform bank",
+"Report on WhatsApp",
+"Call 1930",
+"Warn contacts"
+]
+},
+"content_hi": {
+"what_is": "व्हाट्सएप पर ठग मैसेज या कॉल के जरिए आपको धोखा देते हैं।",
+"how_it_works": [
+"दोस्त बनकर मैसेज करते हैं",
+"पैसे मांगते हैं",
+"नकली लिंक भेजते हैं",
+"OTP मांगते हैं"
+],
+"warning_signs": [
+"अजनबी नंबर",
+"तुरंत पैसे मांगना",
+"संदिग्ध लिंक",
+"फर्जी प्रोफाइल फोटो"
+],
+"what_not_to_do": [
+"बिना जांच पैसे न भेजें",
+"लिंक पर क्लिक न करें",
+"OTP न दें",
+"फॉरवर्ड पर भरोसा न करें"
+],
+"how_to_stay_safe": [
+"कॉल करके जांचें",
+"2-स्टेप वेरिफिकेशन चालू करें",
+"अजनबी नंबर ब्लॉक करें",
+"रिपोर्ट करें"
+],
+"if_affected": [
+"बैंक को बताएं",
+"WhatsApp पर रिपोर्ट करें",
+"1930 पर कॉल करें",
+"कॉन्टैक्ट्स को बताएं"
+]
+},
+"content_te": {
+"what_is": "వాట్సాప్‌లో నకిలీ మెసేజ్‌లు ద్వారా మోసం చేస్తారు.",
+"how_it_works": [
+"స్నేహితుడిగా నటిస్తారు",
+"డబ్బు అడుగుతారు",
+"నకిలీ లింక్ పంపుతారు",
+"OTP అడుగుతారు"
+],
+"warning_signs": [
+"తెలియని నంబర్",
+"త్వరగా డబ్బు అడగడం",
+"సందేహాస్పద లింక్",
+"నకిలీ ఫోటో"
+],
+"what_not_to_do": [
+"ధృవీకరణ లేకుండా డబ్బు పంపవద్దు",
+"లింక్ క్లిక్ చేయవద్దు",
+"OTP ఇవ్వవద్దు",
+"ఫార్వర్డ్ నమ్మవద్దు"
+],
+"how_to_stay_safe": [
+"కాల్ చేసి చెక్ చేయండి",
+"2-స్టెప్ వెరిఫికేషన్ ఆన్ చేయండి",
+"తెలియని నంబర్ బ్లాక్ చేయండి",
+"రిపోర్ట్ చేయండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు చెప్పండి",
+"WhatsAppలో రిపోర్ట్ చేయండి",
+"1930కి కాల్ చేయండి",
+"కాంటాక్ట్స్‌కు చెప్పండి"
+]
+}
+},
+{
+"title_en": "Instagram Investment Scams",
+"title_hi": "इंस्टाग्राम निवेश धोखाधड़ी",
+"title_te": "ఇన్‌స్టాగ్రామ్ పెట్టుబడి మోసాలు",
+"description_en": "Learn how fake Instagram investment scams trap users.",
+"description_hi": "जानें इंस्टाग्राम निवेश धोखाधड़ी से कैसे बचें।",
+"description_te": "ఇన్‌స్టాగ్రామ్ పెట్టుబడి మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Scammers promote fake investment offers on Instagram promising high returns.",
+"how_it_works": [
+"Fake profile posts investment ads",
+"Promises guaranteed returns",
+"Asks you to send money",
+"Shows fake profit screenshots"
+],
+"warning_signs": [
+"Guaranteed profit claims",
+"Unknown influencer",
+"Fake testimonials",
+"Pressure to invest quickly"
+],
+"what_not_to_do": [
+"Do not invest blindly",
+"Do not trust screenshots",
+"Do not send money to unknown accounts",
+"Do not follow urgency"
+],
+"how_to_stay_safe": [
+"Verify platform authenticity",
+"Research before investing",
+"Check SEBI registered advisors",
+"Avoid unrealistic returns"
+],
+"if_affected": [
+"Report to bank",
+"File cyber complaint",
+"Inform Instagram",
+"Stop further payments"
+]
+},
+"content_hi": {
+"what_is": "इंस्टाग्राम पर नकली निवेश ऑफर देकर ठग पैसे लेते हैं।",
+"how_it_works": [
+"फर्जी प्रोफाइल बनाते हैं",
+"पक्का लाभ दिखाते हैं",
+"पैसे मांगते हैं",
+"नकली स्क्रीनशॉट दिखाते हैं"
+],
+"warning_signs": [
+"गारंटी लाभ",
+"अजनबी अकाउंट",
+"नकली रिव्यू",
+"जल्दी निवेश दबाव"
+],
+"what_not_to_do": [
+"बिना जांच निवेश न करें",
+"स्क्रीनशॉट पर भरोसा न करें",
+"अनजान अकाउंट को पैसे न भेजें",
+"जल्दी न करें"
+],
+"how_to_stay_safe": [
+"प्लेटफॉर्म जांचें",
+"रिसर्च करें",
+"SEBI रजिस्ट्रेशन देखें",
+"असली रिटर्न देखें"
+],
+"if_affected": [
+"बैंक को बताएं",
+"शिकायत करें",
+"Instagram को रिपोर्ट करें",
+"आगे भुगतान रोकें"
+]
+},
+"content_te": {
+"what_is": "ఇన్‌స్టాగ్రామ్‌లో నకిలీ పెట్టుబడి ఆఫర్లతో మోసం చేస్తారు.",
+"how_it_works": [
+"నకిలీ అకౌంట్ తయారు చేస్తారు",
+"లాభం హామీ ఇస్తారు",
+"డబ్బు అడుగుతారు",
+"నకిలీ స్క్రీన్‌షాట్ చూపిస్తారు"
+],
+"warning_signs": [
+"గ్యారెంటీ లాభం",
+"తెలియని అకౌంట్",
+"నకిలీ రివ్యూలు",
+"త్వరగా పెట్టుబడి ఒత్తిడి"
+],
+"what_not_to_do": [
+"పరిశీలించకుండా పెట్టుబడి పెట్టవద్దు",
+"స్క్రీన్‌షాట్ నమ్మవద్దు",
+"తెలియని వారికి డబ్బు పంపవద్దు",
+"త్వరపడవద్దు"
+],
+"how_to_stay_safe": [
+"ప్లాట్‌ఫామ్ చెక్ చేయండి",
+"రిసెర్చ్ చేయండి",
+"SEBI రిజిస్ట్రేషన్ చూడండి",
+"అసాధ్యమైన లాభాలను నమ్మవద్దు"
+],
+"if_affected": [
+"బ్యాంక్‌కు చెప్పండి",
+"సైబర్ కంప్లైంట్ చేయండి",
+"Instagramకు రిపోర్ట్ చేయండి",
+"మరింత చెల్లింపులు ఆపండి"
+]
+}
+},
+{
+"title_en": "Telegram Job Scams",
+"title_hi": "टेलीग्राम जॉब धोखाधड़ी",
+"title_te": "టెలిగ్రామ్ ఉద్యోగ మోసాలు",
+"description_en": "Know how Telegram job scams target job seekers.",
+"description_hi": "जानें टेलीग्राम जॉब स्कैम से कैसे बचें।",
+"description_te": "టెలిగ్రామ్ ఉద్యోగ మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Scammers offer fake jobs on Telegram and ask for money or personal data.",
+"how_it_works": [
+"Message about job offer",
+"Promises easy work and high pay",
+"Asks registration fee",
+"Requests personal details"
+],
+"warning_signs": [
+"Job without interview",
+"High salary for simple work",
+"Payment before joining",
+"Unverified recruiter"
+],
+"what_not_to_do": [
+"Do not pay for jobs",
+"Do not share documents",
+"Do not trust unknown recruiters",
+"Do not rush"
+],
+"how_to_stay_safe": [
+"Apply through official sites",
+"Verify company details",
+"Avoid Telegram-only jobs",
+"Check reviews"
+],
+"if_affected": [
+"Report on Telegram",
+"Inform bank",
+"File complaint",
+"Warn others"
+]
+},
+"content_hi": {
+"what_is": "टेलीग्राम पर नकली नौकरी देकर ठग पैसे लेते हैं।",
+"how_it_works": [
+"जॉब मैसेज भेजते हैं",
+"आसान काम बताते हैं",
+"रजिस्ट्रेशन फीस मांगते हैं",
+"डाटा लेते हैं"
+],
+"warning_signs": [
+"बिना इंटरव्यू नौकरी",
+"ज्यादा सैलरी",
+"पहले पैसा मांगना",
+"अज्ञात कंपनी"
+],
+"what_not_to_do": [
+"पैसे न दें",
+"डॉक्यूमेंट न दें",
+"अनजान पर भरोसा न करें",
+"जल्दी न करें"
+],
+"how_to_stay_safe": [
+"ऑफिशियल साइट से आवेदन करें",
+"कंपनी जांचें",
+"Telegram जॉब से बचें",
+"रिव्यू देखें"
+],
+"if_affected": [
+"Telegram पर रिपोर्ट करें",
+"बैंक को बताएं",
+"शिकायत करें",
+"दूसरों को बताएं"
+]
+},
+"content_te": {
+"what_is": "టెలిగ్రామ్‌లో నకిలీ ఉద్యోగాలతో మోసం చేస్తారు.",
+"how_it_works": [
+"జాబ్ మెసేజ్ పంపిస్తారు",
+"సులభమైన పని చెబుతారు",
+"రిజిస్ట్రేషన్ ఫీజు అడుగుతారు",
+"వ్యక్తిగత వివరాలు తీసుకుంటారు"
+],
+"warning_signs": [
+"ఇంటర్వ్యూ లేకుండా ఉద్యోగం",
+"ఎక్కువ జీతం",
+"ముందుగా డబ్బు అడగడం",
+"తెలియని కంపెనీ"
+],
+"what_not_to_do": [
+"డబ్బు ఇవ్వవద్దు",
+"డాక్యుమెంట్లు ఇవ్వవద్దు",
+"తెలియని వారికి నమ్మకం పెట్టవద్దు",
+"త్వరపడవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక సైట్ ద్వారా అప్లై చేయండి",
+"కంపెనీ చెక్ చేయండి",
+"Telegram జాబ్‌లను తప్పించండి",
+"రివ్యూలు చూడండి"
+],
+"if_affected": [
+"Telegramలో రిపోర్ట్ చేయండి",
+"బ్యాంక్‌కు చెప్పండి",
+"ఫిర్యాదు చేయండి",
+"ఇతరులకు చెప్పండి"
+]
+}
+}
+]
+
+[
+{
+"title_en": "Fake Apps / APK Scams",
+"title_hi": "नकली ऐप / APK धोखाधड़ी",
+"title_te": "నకిలీ యాప్ / APK మోసాలు",
+"description_en": "Learn how fake apps steal your data and money, and how to avoid them.",
+"description_hi": "जानें नकली ऐप कैसे आपकी जानकारी और पैसा चुराते हैं।",
+"description_te": "నకిలీ యాప్‌లు మీ డేటా మరియు డబ్బు ఎలా దోచుకుంటాయో తెలుసుకోండి.",
+"category": "TECH",
+"read_time": 3,
+"content_en": {
+"what_is": "Fake apps or APK scams involve installing unofficial apps that steal your personal data or money.",
+"how_it_works": [
+"You download app from unknown website",
+"App looks like real bank or service app",
+"It asks for permissions like SMS, contacts",
+"It secretly captures data and OTPs",
+"Scammer uses data for fraud"
+],
+"warning_signs": [
+"App not on Play Store/App Store",
+"Too many permissions asked",
+"Poor design or spelling mistakes",
+"Unknown developer name"
+],
+"what_not_to_do": [
+"Do not install apps from unknown links",
+"Do not allow unnecessary permissions",
+"Do not ignore warnings",
+"Do not download cracked APKs"
+],
+"how_to_stay_safe": [
+"Install apps only from Play Store/App Store",
+"Check developer name and reviews",
+"Keep phone updated",
+"Use mobile security apps"
+],
+"if_affected": [
+"Uninstall the app immediately",
+"Change passwords",
+"Inform bank",
+"Scan device for malware"
+]
+},
+"content_hi": {
+"what_is": "नकली ऐप धोखाधड़ी में ठग फर्जी ऐप से आपकी जानकारी और पैसा चुरा लेते हैं।",
+"how_it_works": [
+"आप अज्ञात साइट से ऐप डाउनलोड करते हैं",
+"ऐप असली जैसा दिखता है",
+"अधिक परमिशन मांगता है",
+"डेटा और OTP चुरा लेता है",
+"ठग उसका उपयोग करते हैं"
+],
+"warning_signs": [
+"Play Store पर उपलब्ध नहीं",
+"ज्यादा परमिशन मांगना",
+"गलत डिजाइन या स्पेलिंग",
+"अज्ञात डेवलपर"
+],
+"what_not_to_do": [
+"अनजान लिंक से ऐप इंस्टॉल न करें",
+"अनावश्यक परमिशन न दें",
+"चेतावनी नजरअंदाज न करें",
+"क्रैक्ड APK न डाउनलोड करें"
+],
+"how_to_stay_safe": [
+"सिर्फ Play Store/App Store से ऐप लें",
+"रिव्यू और डेवलपर जांचें",
+"फोन अपडेट रखें",
+"सुरक्षा ऐप उपयोग करें"
+],
+"if_affected": [
+"ऐप हटाएं",
+"पासवर्ड बदलें",
+"बैंक को बताएं",
+"फोन स्कैन करें"
+]
+},
+"content_te": {
+"what_is": "నకిలీ యాప్‌ల ద్వారా మీ డేటా మరియు డబ్బు దోచుకుంటారు.",
+"how_it_works": [
+"తెలియని వెబ్‌సైట్ నుండి యాప్ డౌన్‌లోడ్ చేస్తారు",
+"అది నిజమైన యాప్‌లా కనిపిస్తుంది",
+"అనవసర అనుమతులు అడుగుతుంది",
+"డేటా మరియు OTPలను దొంగిలిస్తుంది",
+"మోసగాళ్లు వాడుతారు"
+],
+"warning_signs": [
+"Play Storeలో లేదు",
+"అధిక అనుమతులు అడగడం",
+"తప్పు స్పెల్లింగ్",
+"తెలియని డెవలపర్"
+],
+"what_not_to_do": [
+"తెలియని లింక్‌ల నుండి యాప్ ఇన్‌స్టాల్ చేయవద్దు",
+"అనవసర అనుమతులు ఇవ్వవద్దు",
+"హెచ్చరికలు పట్టించుకోకుండా ఉండవద్దు",
+"క్రాక్ APKలు వాడవద్దు"
+],
+"how_to_stay_safe": [
+"Play Store/App Store నుండి మాత్రమే ఇన్‌స్టాల్ చేయండి",
+"రివ్యూలు చెక్ చేయండి",
+"ఫోన్ అప్‌డేట్ చేయండి",
+"సెక్యూరిటీ యాప్ వాడండి"
+],
+"if_affected": [
+"యాప్ తొలగించండి",
+"పాస్‌వర్డ్ మార్చండి",
+"బ్యాంక్‌కు చెప్పండి",
+"డివైస్ స్కాన్ చేయండి"
+]
+}
+},
+{
+"title_en": "Screen Sharing Scams",
+"title_hi": "स्क्रीन शेयरिंग धोखाधड़ी",
+"title_te": "స్క్రీన్ షేరింగ్ మోసాలు",
+"description_en": "Understand how scammers misuse screen sharing apps to steal your money.",
+"description_hi": "जानें स्क्रीन शेयरिंग धोखाधड़ी कैसे होती है।",
+"description_te": "స్క్రీన్ షేరింగ్ మోసాలు ఎలా జరుగుతాయో తెలుసుకోండి.",
+"category": "TECH",
+"read_time": 3,
+"content_en": {
+"what_is": "Screen sharing scams happen when scammers convince you to share your mobile screen to access your private information.",
+"how_it_works": [
+"Scammer calls as customer support",
+"Asks you to install screen sharing app",
+"You share your screen",
+"They watch your banking or OTP activity",
+"They misuse it to transfer money"
+],
+"warning_signs": [
+"Request to install AnyDesk/TeamViewer",
+"Asks to share screen",
+"Claims urgent issue",
+"Requests banking actions during call"
+],
+"what_not_to_do": [
+"Do not share screen with unknown person",
+"Do not install remote apps on request",
+"Do not open banking apps during call",
+"Do not follow instructions blindly"
+],
+"how_to_stay_safe": [
+"Never share your screen with strangers",
+"Use official customer support",
+"Disconnect call if suspicious",
+"Uninstall unused apps"
+],
+"if_affected": [
+"Turn off internet immediately",
+"Call bank and block account",
+"Uninstall remote apps",
+"Report to 1930"
+]
+},
+"content_hi": {
+"what_is": "स्क्रीन शेयरिंग धोखाधड़ी में ठग आपकी स्क्रीन देखकर जानकारी चुरा लेते हैं।",
+"how_it_works": [
+"ठग सपोर्ट बनकर कॉल करता है",
+"स्क्रीन शेयर ऐप इंस्टॉल करवाता है",
+"आप स्क्रीन शेयर करते हैं",
+"वह आपकी गतिविधि देखता है",
+"पैसे ट्रांसफर करता है"
+],
+"warning_signs": [
+"AnyDesk/TeamViewer इंस्टॉल करने को कहना",
+"स्क्रीन शेयर मांगना",
+"जल्दी का दबाव",
+"कॉल पर बैंकिंग करना"
+],
+"what_not_to_do": [
+"स्क्रीन शेयर न करें",
+"अनजान ऐप इंस्टॉल न करें",
+"कॉल पर बैंकिंग न करें",
+"अंधाधुंध निर्देश न मानें"
+],
+"how_to_stay_safe": [
+"कभी स्क्रीन शेयर न करें",
+"आधिकारिक सपोर्ट लें",
+"संदेह पर कॉल काटें",
+"अनावश्यक ऐप हटाएं"
+],
+"if_affected": [
+"इंटरनेट बंद करें",
+"बैंक को कॉल करें",
+"ऐप हटाएं",
+"1930 पर रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "స్క్రీన్ షేరింగ్ ద్వారా మీ సమాచారం దొంగిలిస్తారు.",
+"how_it_works": [
+"సపోర్ట్‌గా నటించి కాల్ చేస్తారు",
+"స్క్రీన్ షేర్ యాప్ ఇన్‌స్టాల్ చేయమంటారు",
+"మీరు స్క్రీన్ షేర్ చేస్తారు",
+"మీ కార్యకలాపాలు చూస్తారు",
+"డబ్బు దోచుకుంటారు"
+],
+"warning_signs": [
+"AnyDesk/TeamViewer ఇన్‌స్టాల్ చేయమని అడగడం",
+"స్క్రీన్ షేర్ అడగడం",
+"త్వరగా ఒత్తిడి",
+"కాల్స్‌లో బ్యాంకింగ్ చేయమని చెప్పడం"
+],
+"what_not_to_do": [
+"స్క్రీన్ షేర్ చేయవద్దు",
+"తెలియని యాప్ ఇన్‌స్టాల్ చేయవద్దు",
+"కాల్స్‌లో బ్యాంకింగ్ చేయవద్దు",
+"అంధంగా నమ్మవద్దు"
+],
+"how_to_stay_safe": [
+"ఎవరితోనూ స్క్రీన్ షేర్ చేయవద్దు",
+"అధికారిక సపోర్ట్ వాడండి",
+"సందేహం ఉంటే కాల్ కట్ చేయండి",
+"అనవసర యాప్ తొలగించండి"
+],
+"if_affected": [
+"ఇంటర్నెట్ ఆఫ్ చేయండి",
+"బ్యాంక్‌కు కాల్ చేయండి",
+"యాప్ తొలగించండి",
+"1930కి రిపోర్ట్ చేయండి"
+]
+}
+},
+{
+"title_en": "Remote Access Scams",
+"title_hi": "रिमोट एक्सेस धोखाधड़ी",
+"title_te": "రిమోట్ యాక్సెస్ మోసాలు",
+"description_en": "Learn how remote access scams give scammers full control of your device.",
+"description_hi": "जानें रिमोट एक्सेस धोखाधड़ी कैसे होती है।",
+"description_te": "రిమోట్ యాక్సెస్ మోసాలు ఎలా జరుగుతాయో తెలుసుకోండి.",
+"category": "TECH",
+"read_time": 3,
+"content_en": {
+"what_is": "Remote access scams occur when scammers gain control of your device using apps or links.",
+"how_it_works": [
+"Scammer asks you to install remote app",
+"You give access permissions",
+"They control your phone remotely",
+"They access banking apps and data",
+"They transfer money"
+],
+"warning_signs": [
+"Request for remote control access",
+"Asking to install unknown apps",
+"Device behaving strangely",
+"Unauthorized actions happening"
+],
+"what_not_to_do": [
+"Do not give remote access",
+"Do not install unknown apps",
+"Do not share codes or permissions",
+"Do not ignore suspicious activity"
+],
+"how_to_stay_safe": [
+"Install apps only from official stores",
+"Check app permissions",
+"Keep device updated",
+"Use antivirus/security apps"
+],
+"if_affected": [
+"Turn off device or internet",
+"Uninstall suspicious apps",
+"Reset device if needed",
+"Contact bank and report to 1930"
+]
+},
+"content_hi": {
+"what_is": "रिमोट एक्सेस धोखाधड़ी में ठग आपके फोन को नियंत्रित कर लेते हैं।",
+"how_it_works": [
+"ठग ऐप इंस्टॉल करवाता है",
+"आप एक्सेस देते हैं",
+"वह फोन कंट्रोल करता है",
+"बैंकिंग डेटा देखता है",
+"पैसे ट्रांसफर करता है"
+],
+"warning_signs": [
+"रिमोट एक्सेस मांगना",
+"अनजान ऐप इंस्टॉल करवाना",
+"फोन का अजीब व्यवहार",
+"अपने आप काम होना"
+],
+"what_not_to_do": [
+"रिमोट एक्सेस न दें",
+"अनजान ऐप न डालें",
+"कोड साझा न करें",
+"संदेह को नजरअंदाज न करें"
+],
+"how_to_stay_safe": [
+"सिर्फ आधिकारिक ऐप लें",
+"परमिशन जांचें",
+"फोन अपडेट रखें",
+"सुरक्षा ऐप उपयोग करें"
+],
+"if_affected": [
+"फोन/इंटरनेट बंद करें",
+"ऐप हटाएं",
+"फोन रीसेट करें",
+"बैंक और 1930 को रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "రిమోట్ యాక్సెస్ ద్వారా మీ ఫోన్‌ను పూర్తిగా నియంత్రిస్తారు.",
+"how_it_works": [
+"యాప్ ఇన్‌స్టాల్ చేయమంటారు",
+"మీరు అనుమతులు ఇస్తారు",
+"వారు ఫోన్‌ను నియంత్రిస్తారు",
+"బ్యాంకింగ్ వివరాలు చూస్తారు",
+"డబ్బు దోచుకుంటారు"
+],
+"warning_signs": [
+"రిమోట్ యాక్సెస్ అడగడం",
+"తెలియని యాప్ ఇన్‌స్టాల్ చేయమని చెప్పడం",
+"ఫోన్ వింతగా పనిచేయడం",
+"మీకు తెలియకుండా చర్యలు జరగడం"
+],
+"what_not_to_do": [
+"రిమోట్ యాక్సెస్ ఇవ్వవద్దు",
+"తెలియని యాప్ ఇన్‌స్టాల్ చేయవద్దు",
+"కోడ్స్ లేదా అనుమతులు ఇవ్వవద్దు",
+"సందేహం పట్టించుకోకుండా ఉండవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక స్టోర్ నుండి మాత్రమే యాప్ తీసుకోండి",
+"అనుమతులు చెక్ చేయండి",
+"డివైస్ అప్‌డేట్ చేయండి",
+"సెక్యూరిటీ యాప్ వాడండి"
+],
+"if_affected": [
+"ఇంటర్నెట్ ఆఫ్ చేయండి",
+"సందేహాస్పద యాప్ తొలగించండి",
+"ఫోన్ రీసెట్ చేయండి",
+"బ్యాంక్‌కు చెప్పి 1930కి రిపోర్ట్ చేయండి"
+]
+}
+}
+]
+
+[
+{
+"title_en": "How to Create Strong Passwords",
+"title_hi": "मजबूत पासवर्ड कैसे बनाएं",
+"title_te": "బలమైన పాస్‌వర్డ్ ఎలా సృష్టించాలి",
+"description_en": "Learn how to create strong passwords to protect your accounts.",
+"description_hi": "अपने अकाउंट को सुरक्षित रखने के लिए मजबूत पासवर्ड बनाना सीखें।",
+"description_te": "మీ అకౌంట్‌ను రక్షించడానికి బలమైన పాస్‌వర్డ్ ఎలా సృష్టించాలో తెలుసుకోండి.",
+"category": "SAFETY",
+"read_time": 3,
+"content_en": {
+"what_is": "A strong password is a secure combination of letters, numbers, and symbols that protects your accounts.",
+"how_it_works": [
+"Use at least 8-12 characters",
+"Mix uppercase, lowercase, numbers, symbols",
+"Avoid common words",
+"Use different passwords for each account"
+],
+"warning_signs": [
+"Using same password everywhere",
+"Simple passwords like 123456",
+"Using personal info like name or DOB",
+"Saving passwords in notes"
+],
+"what_not_to_do": [
+"Do not reuse passwords",
+"Do not share passwords",
+"Do not use easy patterns",
+"Do not store passwords openly"
+],
+"how_to_stay_safe": [
+"Use password manager",
+"Enable two-factor authentication",
+"Change passwords regularly",
+"Keep passwords private"
+],
+"if_affected": [
+"Change password immediately",
+"Log out from all devices",
+"Enable 2FA",
+"Check account activity"
+]
+},
+"content_hi": {
+"what_is": "मजबूत पासवर्ड आपके अकाउंट को सुरक्षित रखता है।",
+"how_it_works": [
+"8-12 अक्षर का पासवर्ड रखें",
+"बड़े, छोटे अक्षर, नंबर, चिन्ह मिलाएं",
+"आसान शब्द न रखें",
+"हर अकाउंट के लिए अलग पासवर्ड रखें"
+],
+"warning_signs": [
+"एक ही पासवर्ड सभी जगह",
+"123456 जैसे पासवर्ड",
+"नाम या जन्मतिथि उपयोग करना",
+"नोट्स में पासवर्ड रखना"
+],
+"what_not_to_do": [
+"पासवर्ड दोहराएं नहीं",
+"पासवर्ड साझा न करें",
+"आसान पैटर्न न रखें",
+"खुले में स्टोर न करें"
+],
+"how_to_stay_safe": [
+"पासवर्ड मैनेजर उपयोग करें",
+"2FA चालू करें",
+"नियमित बदलाव करें",
+"गुप्त रखें"
+],
+"if_affected": [
+"पासवर्ड बदलें",
+"सभी डिवाइस से लॉगआउट करें",
+"2FA चालू करें",
+"अकाउंट गतिविधि देखें"
+]
+},
+"content_te": {
+"what_is": "బలమైన పాస్‌వర్డ్ మీ అకౌంట్‌ను రక్షిస్తుంది.",
+"how_it_works": [
+"8-12 అక్షరాలు వాడండి",
+"పెద్ద, చిన్న అక్షరాలు, సంఖ్యలు కలపండి",
+"సాధారణ పదాలు వాడవద్దు",
+"ప్రతి అకౌంట్‌కు వేరు పాస్‌వర్డ్ వాడండి"
+],
+"warning_signs": [
+"ఒకే పాస్‌వర్డ్ అన్ని చోట్ల",
+"123456 వంటి సులభ పాస్‌వర్డ్",
+"పేరు లేదా DOB వాడటం",
+"నోట్స్‌లో సేవ్ చేయడం"
+],
+"what_not_to_do": [
+"పాస్‌వర్డ్ పునరావృతం చేయవద్దు",
+"పంచుకోవద్దు",
+"సులభ ప్యాటర్న్స్ వాడవద్దు",
+"బయట నిల్వ చేయవద్దు"
+],
+"how_to_stay_safe": [
+"పాస్‌వర్డ్ మేనేజర్ వాడండి",
+"2FA ఆన్ చేయండి",
+"నియమితంగా మార్చండి",
+"రహస్యంగా ఉంచండి"
+],
+"if_affected": [
+"పాస్‌వర్డ్ మార్చండి",
+"అన్ని డివైస్‌ల నుండి లాగౌట్ చేయండి",
+"2FA ఆన్ చేయండి",
+"అకౌంట్ కార్యకలాపాలు చెక్ చేయండి"
+]
+}
+},
+{
+"title_en": "How to Protect Your Bank Account",
+"title_hi": "अपने बैंक अकाउंट को सुरक्षित कैसे रखें",
+"title_te": "మీ బ్యాంక్ అకౌంట్‌ను ఎలా రక్షించాలి",
+"description_en": "Learn simple steps to keep your bank account safe from fraud.",
+"description_hi": "अपने बैंक अकाउंट को सुरक्षित रखने के आसान तरीके जानें।",
+"description_te": "మీ బ్యాంక్ అకౌంట్‌ను మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SAFETY",
+"read_time": 3,
+"content_en": {
+"what_is": "Protecting your bank account means keeping your money safe from unauthorized access.",
+"how_it_works": [
+"Use secure login details",
+"Enable SMS/email alerts",
+"Monitor transactions regularly",
+"Use official banking apps"
+],
+"warning_signs": [
+"Unknown transactions",
+"OTP requests without action",
+"Bank alerts you didn’t expect",
+"Login issues"
+],
+"what_not_to_do": [
+"Do not share OTP or PIN",
+"Do not use public Wi-Fi for banking",
+"Do not ignore alerts",
+"Do not save details in browser"
+],
+"how_to_stay_safe": [
+"Enable transaction alerts",
+"Use strong passwords",
+"Update banking apps",
+"Verify all calls"
+],
+"if_affected": [
+"Call bank immediately",
+"Block account/cards",
+"Report to 1930",
+"Check transactions"
+]
+},
+"content_hi": {
+"what_is": "बैंक अकाउंट को सुरक्षित रखना आपके पैसे को सुरक्षित रखना है।",
+"how_it_works": [
+"सुरक्षित लॉगिन रखें",
+"SMS अलर्ट चालू करें",
+"ट्रांजैक्शन जांचें",
+"आधिकारिक ऐप उपयोग करें"
+],
+"warning_signs": [
+"अज्ञात ट्रांजैक्शन",
+"बिना कारण OTP",
+"अचानक अलर्ट",
+"लॉगिन समस्या"
+],
+"what_not_to_do": [
+"OTP या PIN न दें",
+"पब्लिक Wi-Fi उपयोग न करें",
+"अलर्ट नजरअंदाज न करें",
+"ब्राउज़र में सेव न करें"
+],
+"how_to_stay_safe": [
+"अलर्ट चालू रखें",
+"मजबूत पासवर्ड रखें",
+"ऐप अपडेट रखें",
+"कॉल सत्यापित करें"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"अकाउंट ब्लॉक करें",
+"1930 पर रिपोर्ट करें",
+"ट्रांजैक्शन जांचें"
+]
+},
+"content_te": {
+"what_is": "బ్యాంక్ అకౌంట్‌ను రక్షించడం అంటే మీ డబ్బును రక్షించడం.",
+"how_it_works": [
+"సురక్షిత లాగిన్ వాడండి",
+"SMS అలర్ట్స్ ఆన్ చేయండి",
+"ట్రాన్సాక్షన్లు చెక్ చేయండి",
+"అధికారిక యాప్ వాడండి"
+],
+"warning_signs": [
+"తెలియని ట్రాన్సాక్షన్లు",
+"అనుకోని OTPలు",
+"అనూహ్య అలర్ట్స్",
+"లాగిన్ సమస్యలు"
+],
+"what_not_to_do": [
+"OTP లేదా PIN ఇవ్వవద్దు",
+"పబ్లిక్ Wi-Fi వాడవద్దు",
+"అలర్ట్స్ పట్టించుకోకుండా ఉండవద్దు",
+"బ్రౌజర్‌లో సేవ్ చేయవద్దు"
+],
+"how_to_stay_safe": [
+"అలర్ట్స్ ఆన్ చేయండి",
+"బలమైన పాస్‌వర్డ్ వాడండి",
+"యాప్ అప్‌డేట్ చేయండి",
+"కాల్స్ ధృవీకరించండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"అకౌంట్ బ్లాక్ చేయండి",
+"1930కి రిపోర్ట్ చేయండి",
+"ట్రాన్సాక్షన్లు చెక్ చేయండి"
+]
+}
+},
+{
+"title_en": "How to Identify Fake Links",
+"title_hi": "नकली लिंक कैसे पहचानें",
+"title_te": "నకిలీ లింక్‌లను ఎలా గుర్తించాలి",
+"description_en": "Learn how to identify fake links and avoid phishing scams.",
+"description_hi": "नकली लिंक पहचानना सीखें और फिशिंग से बचें।",
+"description_te": "నకిలీ లింక్‌లను గుర్తించి ఫిషింగ్ నుండి రక్షించుకోండి.",
+"category": "SAFETY",
+"read_time": 3,
+"content_en": {
+"what_is": "Fake links are malicious URLs designed to steal your data or money.",
+"how_it_works": [
+"You receive link via SMS/WhatsApp",
+"Link looks like real website",
+"You click and enter details",
+"Scammer steals your info"
+],
+"warning_signs": [
+"Strange URL spelling",
+"Shortened links",
+"Urgent messages",
+"Unknown sender"
+],
+"what_not_to_do": [
+"Do not click unknown links",
+"Do not enter details",
+"Do not download files",
+"Do not trust messages blindly"
+],
+"how_to_stay_safe": [
+"Check URL carefully",
+"Type website manually",
+"Use official apps",
+"Avoid clicking SMS links"
+],
+"if_affected": [
+"Change passwords",
+"Inform bank",
+"Scan device",
+"Report link"
+]
+},
+"content_hi": {
+"what_is": "नकली लिंक आपकी जानकारी चुराने के लिए बनाई जाती हैं।",
+"how_it_works": [
+"SMS या WhatsApp लिंक मिलता है",
+"लिंक असली जैसा लगता है",
+"आप जानकारी डालते हैं",
+"ठग चुरा लेते हैं"
+],
+"warning_signs": [
+"गलत URL स्पेलिंग",
+"शॉर्ट लिंक",
+"जल्दी का दबाव",
+"अजनबी भेजने वाला"
+],
+"what_not_to_do": [
+"अनजान लिंक न खोलें",
+"जानकारी न डालें",
+"फाइल डाउनलोड न करें",
+"अंधाधुंध भरोसा न करें"
+],
+"how_to_stay_safe": [
+"URL जांचें",
+"साइट खुद टाइप करें",
+"आधिकारिक ऐप उपयोग करें",
+"SMS लिंक से बचें"
+],
+"if_affected": [
+"पासवर्ड बदलें",
+"बैंक को बताएं",
+"फोन स्कैन करें",
+"रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "నకిలీ లింక్‌లు మీ సమాచారాన్ని దొంగిలించడానికి ఉపయోగిస్తారు.",
+"how_it_works": [
+"SMS లేదా WhatsApp ద్వారా లింక్ వస్తుంది",
+"నిజమైనదిలా కనిపిస్తుంది",
+"మీరు వివరాలు ఇస్తారు",
+"మోసగాళ్లు దొంగిలిస్తారు"
+],
+"warning_signs": [
+"తప్పు URL స్పెల్లింగ్",
+"షార్ట్ లింక్",
+"త్వరగా ఒత్తిడి",
+"తెలియని పంపినవారు"
+],
+"what_not_to_do": [
+"తెలియని లింక్ క్లిక్ చేయవద్దు",
+"వివరాలు ఇవ్వవద్దు",
+"ఫైళ్లు డౌన్‌లోడ్ చేయవద్దు",
+"నమ్మకంగా తీసుకోకండి"
+],
+"how_to_stay_safe": [
+"URL చెక్ చేయండి",
+"సైట్ మాన్యువల్‌గా టైప్ చేయండి",
+"అధికారిక యాప్ వాడండి",
+"SMS లింక్‌లను నివారించండి"
+],
+"if_affected": [
+"పాస్‌వర్డ్ మార్చండి",
+"బ్యాంక్‌కు చెప్పండి",
+"డివైస్ స్కాన్ చేయండి",
+"రిపోర్ట్ చేయండి"
+]
+}
+},
+{
+"title_en": "What to Do After Getting Scammed",
+"title_hi": "धोखा होने के बाद क्या करें",
+"title_te": "మోసం జరిగిన తర్వాత ఏమి చేయాలి",
+"description_en": "Quick steps to take immediately after a scam to reduce loss.",
+"description_hi": "धोखा होने पर तुरंत क्या करना चाहिए जानें।",
+"description_te": "మోసం జరిగితే వెంటనే చేయాల్సిన చర్యలు తెలుసుకోండి.",
+"category": "SAFETY",
+"read_time": 3,
+"content_en": {
+"what_is": "This guide helps you take quick action after being scammed to reduce damage.",
+"how_it_works": [
+"Identify the fraud quickly",
+"Stop further transactions",
+"Inform bank immediately",
+"Report to authorities"
+],
+"warning_signs": [
+"Money deducted without action",
+"OTP received unexpectedly",
+"Account login issues",
+"Unknown transactions"
+],
+"what_not_to_do": [
+"Do not ignore the issue",
+"Do not delay reporting",
+"Do not panic",
+"Do not continue using compromised apps"
+],
+"how_to_stay_safe": [
+"Act within minutes",
+"Keep proof like screenshots",
+"Use official helplines",
+"Inform contacts if needed"
+],
+"if_affected": [
+"Call bank and block account",
+"Dial 1930 immediately",
+"File complaint on cybercrime.gov.in",
+"Change all passwords"
+]
+},
+"content_hi": {
+"what_is": "धोखा होने के बाद सही कदम उठाकर नुकसान कम किया जा सकता है।",
+"how_it_works": [
+"धोखा पहचानें",
+"लेन-देन रोकें",
+"बैंक को बताएं",
+"रिपोर्ट करें"
+],
+"warning_signs": [
+"बिना कारण पैसे कटना",
+"अनचाहा OTP",
+"लॉगिन समस्या",
+"अज्ञात ट्रांजैक्शन"
+],
+"what_not_to_do": [
+"नजरअंदाज न करें",
+"देरी न करें",
+"घबराएं नहीं",
+"संक्रमित ऐप उपयोग न करें"
+],
+"how_to_stay_safe": [
+"तुरंत कार्रवाई करें",
+"सबूत रखें",
+"आधिकारिक हेल्पलाइन उपयोग करें",
+"जरूरत हो तो दूसरों को बताएं"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"1930 पर कॉल करें",
+"ऑनलाइन शिकायत करें",
+"पासवर्ड बदलें"
+]
+},
+"content_te": {
+"what_is": "మోసం తర్వాత వెంటనే చర్యలు తీసుకుంటే నష్టం తగ్గుతుంది.",
+"how_it_works": [
+"మోసం గుర్తించండి",
+"ట్రాన్సాక్షన్ ఆపండి",
+"బ్యాంక్‌కు చెప్పండి",
+"రిపోర్ట్ చేయండి"
+],
+"warning_signs": [
+"తెలియని డబ్బు కట్ అవ్వడం",
+"అనుకోని OTP",
+"లాగిన్ సమస్యలు",
+"తెలియని ట్రాన్సాక్షన్లు"
+],
+"what_not_to_do": [
+"పట్టించుకోకుండా ఉండవద్దు",
+"ఆలస్యం చేయవద్దు",
+"భయపడవద్దు",
+"ప్రభావిత యాప్ వాడవద్దు"
+],
+"how_to_stay_safe": [
+"త్వరగా చర్యలు తీసుకోండి",
+"సాక్ష్యాలు సేవ్ చేయండి",
+"అధికారిక హెల్ప్‌లైన్ వాడండి",
+"అవసరమైతే ఇతరులకు చెప్పండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"1930కి కాల్ చేయండి",
+"ఆన్‌లైన్ ఫిర్యాదు చేయండి",
+"పాస్‌వర్డ్ మార్చండి"
+]
+}
+}
+]
+
+[
+{
+"title_en": "Fake Bank Calls Asking OTP",
+"title_hi": "नकली बैंक कॉल द्वारा OTP धोखाधड़ी",
+"title_te": "నకిలీ బ్యాంక్ కాల్‌ల ద్వారా OTP మోసం",
+"description_en": "Learn how scammers pretend to be bank officials and steal your OTP.",
+"description_hi": "जानें कैसे ठग बैंक बनकर OTP लेकर धोखा देते हैं।",
+"description_te": "బ్యాంక్‌గా నటించి OTP తీసుకుని ఎలా మోసం చేస్తారో తెలుసుకోండి.",
+"category": "CORE",
+"read_time": 3,
+"content_en": {
+"what_is": "Scammers call pretending to be bank officials and ask for your OTP to steal money from your account.",
+"how_it_works": [
+"Caller claims to be from bank or RBI",
+"Says your account will be blocked or KYC pending",
+"Asks for OTP to verify",
+"Uses OTP to complete transaction",
+"Money gets deducted instantly"
+],
+"warning_signs": [
+"Call asking for OTP",
+"Threats like account will be blocked",
+"Unknown number claiming bank",
+"Urgent tone"
+],
+"what_not_to_do": [
+"Do not share OTP",
+"Do not trust unknown callers",
+"Do not panic",
+"Do not follow instructions blindly"
+],
+"how_to_stay_safe": [
+"Banks never ask OTP on call",
+"Always disconnect suspicious calls",
+"Verify by calling official bank number",
+"Enable transaction alerts"
+],
+"if_affected": [
+"Call bank immediately",
+"Block account/cards",
+"Dial 1930",
+"Report on cybercrime portal"
+]
+},
+"content_hi": {
+"what_is": "ठग बैंक अधिकारी बनकर OTP लेकर पैसे चुरा लेते हैं।",
+"how_it_works": [
+"बैंक बनकर कॉल करते हैं",
+"KYC या ब्लॉक की बात करते हैं",
+"OTP मांगते हैं",
+"ट्रांजैक्शन करते हैं",
+"पैसे कट जाते हैं"
+],
+"warning_signs": [
+"OTP मांगने वाला कॉल",
+"अकाउंट बंद करने की धमकी",
+"अज्ञात नंबर",
+"जल्दी का दबाव"
+],
+"what_not_to_do": [
+"OTP न दें",
+"अनजान कॉल पर भरोसा न करें",
+"घबराएं नहीं",
+"अंधाधुंध न मानें"
+],
+"how_to_stay_safe": [
+"बैंक OTP नहीं मांगते",
+"संदेह हो तो कॉल काटें",
+"आधिकारिक नंबर से जांचें",
+"अलर्ट चालू रखें"
+],
+"if_affected": [
+"बैंक को कॉल करें",
+"अकाउंट ब्लॉक करें",
+"1930 पर कॉल करें",
+"रिपोर्ट करें"
+]
+},
+"content_te": {
+"what_is": "బ్యాంక్‌గా నటించి OTP తీసుకుని డబ్బు దోచుకుంటారు.",
+"how_it_works": [
+"బ్యాంక్‌గా కాల్ చేస్తారు",
+"KYC లేదా బ్లాక్ అని చెబుతారు",
+"OTP అడుగుతారు",
+"ట్రాన్సాక్షన్ చేస్తారు",
+"డబ్బు పోతుంది"
+],
+"warning_signs": [
+"OTP అడిగే కాల్",
+"అకౌంట్ బ్లాక్ అని బెదిరించడం",
+"తెలియని నంబర్",
+"త్వరగా ఒత్తిడి"
+],
+"what_not_to_do": [
+"OTP ఇవ్వవద్దు",
+"తెలియని కాల్ నమ్మవద్దు",
+"భయపడవద్దు",
+"అంధంగా అనుసరించవద్దు"
+],
+"how_to_stay_safe": [
+"బ్యాంక్ OTP అడగదు",
+"సందేహం ఉంటే కాల్ కట్ చేయండి",
+"అధికారిక నంబర్‌తో చెక్ చేయండి",
+"అలర్ట్స్ ఆన్ చేయండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు కాల్ చేయండి",
+"అకౌంట్ బ్లాక్ చేయండి",
+"1930కి కాల్ చేయండి",
+"రిపోర్ట్ చేయండి"
+]
+}
+},
+{
+"title_en": "Government Scheme Scams",
+"title_hi": "सरकारी योजना धोखाधड़ी",
+"title_te": "ప్రభుత్వ పథకాల మోసాలు",
+"description_en": "Beware of fake government schemes that promise free money or benefits.",
+"description_hi": "नकली सरकारी योजनाओं से सावधान रहें।",
+"description_te": "నకిలీ ప్రభుత్వ పథకాల మోసాల నుండి జాగ్రత్తగా ఉండండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Scammers create fake government schemes to trick people into sharing details or paying money.",
+"how_it_works": [
+"Fake message about government benefit",
+"Claims free money or subsidy",
+"Asks for Aadhaar, bank details",
+"Sometimes asks small fee",
+"Uses details for fraud"
+],
+"warning_signs": [
+"Too good to be true benefits",
+"Unknown links or forms",
+"Requests for payment",
+"Forwarded messages"
+],
+"what_not_to_do": [
+"Do not trust random messages",
+"Do not share Aadhaar or bank details",
+"Do not pay any fee",
+"Do not click unknown links"
+],
+"how_to_stay_safe": [
+"Check official government websites",
+"Verify scheme authenticity",
+"Avoid forwarded messages",
+"Stay informed through trusted sources"
+],
+"if_affected": [
+"Inform bank",
+"Report to cybercrime portal",
+"Block account if needed",
+"Warn others"
+]
+},
+"content_hi": {
+"what_is": "ठग नकली सरकारी योजनाओं से लोगों को धोखा देते हैं।",
+"how_it_works": [
+"सरकारी योजना का मैसेज भेजते हैं",
+"मुफ्त पैसे का वादा करते हैं",
+"आधार या बैंक डिटेल मांगते हैं",
+"फीस मांग सकते हैं",
+"जानकारी का गलत उपयोग करते हैं"
+],
+"warning_signs": [
+"बहुत अच्छा ऑफर",
+"अज्ञात लिंक",
+"पैसे मांगना",
+"फॉरवर्ड मैसेज"
+],
+"what_not_to_do": [
+"अनजान मैसेज पर भरोसा न करें",
+"डिटेल्स साझा न करें",
+"फीस न दें",
+"लिंक न खोलें"
+],
+"how_to_stay_safe": [
+"सरकारी साइट जांचें",
+"योजना सत्यापित करें",
+"फॉरवर्ड से बचें",
+"सही स्रोत देखें"
+],
+"if_affected": [
+"बैंक को बताएं",
+"रिपोर्ट करें",
+"अकाउंट सुरक्षित करें",
+"दूसरों को बताएं"
+]
+},
+"content_te": {
+"what_is": "నకిలీ ప్రభుత్వ పథకాలతో మోసం చేస్తారు.",
+"how_it_works": [
+"పథకం మెసేజ్ పంపిస్తారు",
+"ఉచిత డబ్బు అని చెబుతారు",
+"ఆధార్ లేదా బ్యాంక్ వివరాలు అడుగుతారు",
+"ఫీజు అడగవచ్చు",
+"వాటిని దుర్వినియోగం చేస్తారు"
+],
+"warning_signs": [
+"అత్యధిక లాభం వాగ్దానం",
+"తెలియని లింక్",
+"డబ్బు అడగడం",
+"ఫార్వర్డ్ మెసేజ్"
+],
+"what_not_to_do": [
+"తెలియని మెసేజ్ నమ్మవద్దు",
+"వివరాలు ఇవ్వవద్దు",
+"ఫీజు ఇవ్వవద్దు",
+"లింక్ క్లిక్ చేయవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక సైట్ చెక్ చేయండి",
+"పథకం ధృవీకరించండి",
+"ఫార్వర్డ్ మెసేజ్‌లను నివారించండి",
+"నమ్మదగిన వనరులు వాడండి"
+],
+"if_affected": [
+"బ్యాంక్‌కు చెప్పండి",
+"రిపోర్ట్ చేయండి",
+"అకౌంట్ సురక్షితం చేయండి",
+"ఇతరులకు చెప్పండి"
+]
+}
+},
+{
+"title_en": "Loan Scams",
+"title_hi": "लोन धोखाधड़ी",
+"title_te": "లోన్ మోసాలు",
+"description_en": "Learn how fake loan offers trap people and steal money.",
+"description_hi": "जानें नकली लोन ऑफर से कैसे बचें।",
+"description_te": "నకిలీ లోన్ ఆఫర్ల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Loan scams promise instant loans with low interest and trick you into paying fees.",
+"how_it_works": [
+"Message or ad about instant loan",
+"No documents required",
+"Asks for processing fee",
+"After payment, scammer disappears"
+],
+"warning_signs": [
+"Instant approval without checks",
+"Low interest promises",
+"Upfront payment required",
+"Unregistered lender"
+],
+"what_not_to_do": [
+"Do not pay fees before loan",
+"Do not trust unknown lenders",
+"Do not share documents blindly",
+"Do not rush"
+],
+"how_to_stay_safe": [
+"Use RBI-registered banks",
+"Check company details",
+"Read reviews",
+"Avoid too good offers"
+],
+"if_affected": [
+"Inform bank",
+"Report fraud",
+"Stop further payments",
+"Warn others"
+]
+},
+"content_hi": {
+"what_is": "नकली लोन ऑफर से ठग पैसे लेते हैं।",
+"how_it_works": [
+"लोन का मैसेज भेजते हैं",
+"बिना डॉक्यूमेंट लोन कहते हैं",
+"फीस मांगते हैं",
+"पैसे लेने के बाद गायब हो जाते हैं"
+],
+"warning_signs": [
+"तुरंत लोन",
+"कम ब्याज",
+"पहले पैसे मांगना",
+"अज्ञात कंपनी"
+],
+"what_not_to_do": [
+"पहले पैसे न दें",
+"अनजान कंपनी पर भरोसा न करें",
+"डॉक्यूमेंट न दें",
+"जल्दी न करें"
+],
+"how_to_stay_safe": [
+"RBI बैंक उपयोग करें",
+"कंपनी जांचें",
+"रिव्यू देखें",
+"असली ऑफर देखें"
+],
+"if_affected": [
+"बैंक को बताएं",
+"रिपोर्ट करें",
+"भुगतान रोकें",
+"दूसरों को बताएं"
+]
+},
+"content_te": {
+"what_is": "నకిలీ లోన్ ఆఫర్లతో మోసం చేస్తారు.",
+"how_it_works": [
+"లోన్ మెసేజ్ పంపిస్తారు",
+"డాక్యుమెంట్స్ లేకుండా ఇస్తామని చెబుతారు",
+"ఫీజు అడుగుతారు",
+"డబ్బు తీసుకుని మాయమవుతారు"
+],
+"warning_signs": [
+"తక్షణ లోన్",
+"తక్కువ వడ్డీ",
+"ముందుగా డబ్బు అడగడం",
+"తెలియని సంస్థ"
+],
+"what_not_to_do": [
+"ముందుగా డబ్బు ఇవ్వవద్దు",
+"తెలియని సంస్థ నమ్మవద్దు",
+"డాక్యుమెంట్లు ఇవ్వవద్దు",
+"త్వరపడవద్దు"
+],
+"how_to_stay_safe": [
+"RBI గుర్తింపు ఉన్న బ్యాంక్ వాడండి",
+"కంపెనీ చెక్ చేయండి",
+"రివ్యూలు చూడండి",
+"అసాధ్యమైన ఆఫర్లు నమ్మవద్దు"
+],
+"if_affected": [
+"బ్యాంక్‌కు చెప్పండి",
+"రిపోర్ట్ చేయండి",
+"మరింత చెల్లింపులు ఆపండి",
+"ఇతరులకు చెప్పండి"
+]
+}
+},
+{
+"title_en": "SIM Swap Scams",
+"title_hi": "सिम स्वैप धोखाधड़ी",
+"title_te": "సిమ్ స్వాప్ మోసాలు",
+"description_en": "Understand how SIM swap fraud gives scammers control over your mobile number.",
+"description_hi": "जानें सिम स्वैप धोखाधड़ी कैसे काम करती है।",
+"description_te": "సిమ్ స్వాప్ మోసం ఎలా జరుగుతుందో తెలుసుకోండి.",
+"category": "TECH",
+"read_time": 3,
+"content_en": {
+"what_is": "SIM swap scam is when scammers transfer your mobile number to a new SIM to access your bank accounts.",
+"how_it_works": [
+"Scammer collects your personal details",
+"Requests SIM replacement from telecom provider",
+"Your SIM stops working",
+"They receive your OTPs",
+"They access your bank accounts"
+],
+"warning_signs": [
+"Sudden network loss",
+"SIM not working",
+"No calls or messages",
+"Unknown transactions"
+],
+"what_not_to_do": [
+"Do not ignore SIM issues",
+"Do not share personal details",
+"Do not delay reporting",
+"Do not use public Wi-Fi for banking"
+],
+"how_to_stay_safe": [
+"Link Aadhaar securely",
+"Set SIM lock PIN",
+"Monitor network issues",
+"Enable banking alerts"
+],
+"if_affected": [
+"Contact telecom provider immediately",
+"Block bank accounts",
+"Report to 1930",
+"Change all passwords"
+]
+},
+"content_hi": {
+"what_is": "सिम स्वैप में ठग आपका नंबर अपने सिम में ले लेते हैं।",
+"how_it_works": [
+"आपकी जानकारी जुटाते हैं",
+"नया सिम बनवाते हैं",
+"आपका सिम बंद हो जाता है",
+"OTP उनके पास जाता है",
+"अकाउंट एक्सेस करते हैं"
+],
+"warning_signs": [
+"नेटवर्क गायब होना",
+"सिम काम न करना",
+"कॉल/मैसेज बंद",
+"अज्ञात ट्रांजैक्शन"
+],
+"what_not_to_do": [
+"सिम समस्या नजरअंदाज न करें",
+"जानकारी साझा न करें",
+"देरी न करें",
+"पब्लिक Wi-Fi न उपयोग करें"
+],
+"how_to_stay_safe": [
+"SIM लॉक लगाएं",
+"नेटवर्क पर ध्यान दें",
+"अलर्ट चालू रखें",
+"डिटेल्स सुरक्षित रखें"
+],
+"if_affected": [
+"टेलीकॉम को कॉल करें",
+"बैंक ब्लॉक करें",
+"1930 पर रिपोर्ट करें",
+"पासवर्ड बदलें"
+]
+},
+"content_te": {
+"what_is": "సిమ్ స్వాప్ మోసంలో మీ నంబర్‌ను కొత్త సిమ్‌కు మార్చేస్తారు.",
+"how_it_works": [
+"మీ వివరాలు సేకరిస్తారు",
+"కొత్త సిమ్ తీసుకుంటారు",
+"మీ సిమ్ పని చేయదు",
+"OTPలు వారికి వస్తాయి",
+"బ్యాంక్ అకౌంట్ యాక్సెస్ చేస్తారు"
+],
+"warning_signs": [
+"సిగ్నల్ పోవడం",
+"సిమ్ పని చేయకపోవడం",
+"కాల్స్/మెసేజ్‌లు రాకపోవడం",
+"తెలియని ట్రాన్సాక్షన్లు"
+],
+"what_not_to_do": [
+"సిమ్ సమస్యను నిర్లక్ష్యం చేయవద్దు",
+"వివరాలు ఇవ్వవద్దు",
+"ఆలస్యం చేయవద్దు",
+"పబ్లిక్ Wi-Fi వాడవద్దు"
+],
+"how_to_stay_safe": [
+"SIM లాక్ పెట్టండి",
+"నెట్‌వర్క్ గమనించండి",
+"అలర్ట్స్ ఆన్ చేయండి",
+"వివరాలు రహస్యంగా ఉంచండి"
+],
+"if_affected": [
+"టెలికాం కంపెనీకి కాల్ చేయండి",
+"బ్యాంక్ అకౌంట్ బ్లాక్ చేయండి",
+"1930కి రిపోర్ట్ చేయండి",
+"పాస్‌వర్డ్ మార్చండి"
+]
+}
+}
+]
+
+[
+{
+"title_en": "Fake Fertilizer Scams",
+"title_hi": "नकली खाद धोखाधड़ी",
+"title_te": "నకిలీ ఎరువుల మోసాలు",
+"description_en": "Learn how fake fertilizer scams target farmers and how to avoid them.",
+"description_hi": "जानें नकली खाद धोखाधड़ी से कैसे बचें।",
+"description_te": "నకిలీ ఎరువుల మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Fake fertilizer scams involve selling duplicate or low-quality fertilizers to farmers, causing financial loss and crop damage.",
+"how_it_works": [
+"Scammer offers fertilizers at very low price",
+"Sells products without proper branding or license",
+"Pushes quick purchase without bill",
+"Product turns out fake or low quality"
+],
+"warning_signs": [
+"Price much lower than market",
+"No proper packaging or label",
+"No GST bill or receipt",
+"Seller not from known dealer"
+],
+"what_not_to_do": [
+"Do not buy from unknown sellers",
+"Do not trust very low prices",
+"Do not purchase without bill",
+"Do not ignore packaging quality"
+],
+"how_to_stay_safe": [
+"Buy from authorized dealers only",
+"Check product labels and certification",
+"Always take bill",
+"Verify seller credibility"
+],
+"if_affected": [
+"Inform local agriculture officer",
+"Report to police/cybercrime",
+"Keep purchase proof",
+"Warn other farmers"
+]
+},
+"content_hi": {
+"what_is": "नकली खाद धोखाधड़ी में किसानों को खराब या नकली खाद बेची जाती है।",
+"how_it_works": [
+"बहुत सस्ता खाद ऑफर करते हैं",
+"बिना ब्रांड या लाइसेंस बेचते हैं",
+"जल्दी खरीदने को कहते हैं",
+"खाद नकली निकलती है"
+],
+"warning_signs": [
+"बहुत कम कीमत",
+"खराब पैकिंग",
+"बिल नहीं देना",
+"अज्ञात विक्रेता"
+],
+"what_not_to_do": [
+"अनजान विक्रेता से न खरीदें",
+"बहुत सस्ता ऑफर न लें",
+"बिना बिल न खरीदें",
+"पैकिंग नजरअंदाज न करें"
+],
+"how_to_stay_safe": [
+"अधिकृत दुकान से खरीदें",
+"लेबल जांचें",
+"हमेशा बिल लें",
+"विक्रेता की जांच करें"
+],
+"if_affected": [
+"कृषि अधिकारी को बताएं",
+"पुलिस में शिकायत करें",
+"सबूत रखें",
+"अन्य किसानों को बताएं"
+]
+},
+"content_te": {
+"what_is": "నకిలీ ఎరువుల మోసాల్లో రైతులకు నాసిరకం ఎరువులు అమ్ముతారు.",
+"how_it_works": [
+"చాలా తక్కువ ధరలో ఆఫర్ చేస్తారు",
+"బ్రాండ్ లేకుండా అమ్ముతారు",
+"త్వరగా కొనమని ఒత్తిడి చేస్తారు",
+"ఎరువు నకిలీగా ఉంటుంది"
+],
+"warning_signs": [
+"చాలా తక్కువ ధర",
+"ప్యాకేజింగ్ సరిగా లేకపోవడం",
+"బిల్ ఇవ్వకపోవడం",
+"తెలియని విక్రేత"
+],
+"what_not_to_do": [
+"తెలియని వారి దగ్గర కొనవద్దు",
+"చాలా తక్కువ ధర నమ్మవద్దు",
+"బిల్ లేకుండా కొనవద్దు",
+"ప్యాకేజింగ్ పట్టించుకోకుండా ఉండవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక డీలర్ల దగ్గర కొనండి",
+"లేబుల్ చెక్ చేయండి",
+"ఎప్పుడూ బిల్ తీసుకోండి",
+"విక్రేతను ధృవీకరించండి"
+],
+"if_affected": [
+"వ్యవసాయ అధికారికి చెప్పండి",
+"పోలీసులకు ఫిర్యాదు చేయండి",
+"సాక్ష్యాలు ఉంచండి",
+"ఇతర రైతులకు చెప్పండి"
+]
+}
+},
+{
+"title_en": "Tractor Scams",
+"title_hi": "ट्रैक्टर धोखाधड़ी",
+"title_te": "ట్రాక్టర్ మోసాలు",
+"description_en": "Learn how fake tractor deals trap buyers and how to avoid losing money.",
+"description_hi": "जानें नकली ट्रैक्टर डील से कैसे बचें।",
+"description_te": "నకిలీ ట్రాక్టర్ డీల్స్ నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "Tractor scams involve fake ads or sellers offering tractors at very low prices to cheat buyers.",
+"how_it_works": [
+"Scammer posts fake tractor ad online",
+"Offers very low price",
+"Asks for advance payment",
+"Disappears after receiving money"
+],
+"warning_signs": [
+"Price too low compared to market",
+"Seller refuses physical inspection",
+"Urgent payment request",
+"No proper documents"
+],
+"what_not_to_do": [
+"Do not pay advance blindly",
+"Do not trust unknown sellers",
+"Do not skip document check",
+"Do not rush deal"
+],
+"how_to_stay_safe": [
+"Always inspect vehicle physically",
+"Verify RC and documents",
+"Deal through trusted dealers",
+"Use secure payment methods"
+],
+"if_affected": [
+"Report to police",
+"Inform bank",
+"File cyber complaint",
+"Keep transaction proof"
+]
+},
+"content_hi": {
+"what_is": "ट्रैक्टर धोखाधड़ी में ठग नकली डील से पैसे लेते हैं।",
+"how_it_works": [
+"ऑनलाइन नकली विज्ञापन देते हैं",
+"कम कीमत बताते हैं",
+"एडवांस मांगते हैं",
+"पैसे लेकर गायब हो जाते हैं"
+],
+"warning_signs": [
+"बहुत कम कीमत",
+"ट्रैक्टर दिखाने से मना करना",
+"जल्दी पैसे मांगना",
+"दस्तावेज नहीं देना"
+],
+"what_not_to_do": [
+"एडवांस न दें",
+"अनजान विक्रेता पर भरोसा न करें",
+"दस्तावेज जांचे बिना न लें",
+"जल्दी न करें"
+],
+"how_to_stay_safe": [
+"ट्रैक्टर खुद देखें",
+"RC जांचें",
+"विश्वसनीय डीलर से खरीदें",
+"सुरक्षित भुगतान करें"
+],
+"if_affected": [
+"पुलिस में शिकायत करें",
+"बैंक को बताएं",
+"साइबर शिकायत करें",
+"सबूत रखें"
+]
+},
+"content_te": {
+"what_is": "ట్రాక్టర్ మోసాల్లో నకిలీ డీల్స్ ద్వారా డబ్బు దోచుకుంటారు.",
+"how_it_works": [
+"ఆన్‌లైన్‌లో నకిలీ ప్రకటన ఇస్తారు",
+"తక్కువ ధర చెబుతారు",
+"ముందుగా డబ్బు అడుగుతారు",
+"డబ్బు తీసుకుని మాయమవుతారు"
+],
+"warning_signs": [
+"చాలా తక్కువ ధర",
+"వాహనం చూపించకపోవడం",
+"త్వరగా డబ్బు అడగడం",
+"డాక్యుమెంట్లు లేకపోవడం"
+],
+"what_not_to_do": [
+"ముందుగా డబ్బు ఇవ్వవద్దు",
+"తెలియని విక్రేత నమ్మవద్దు",
+"డాక్యుమెంట్లు చెక్ చేయకుండా కొనవద్దు",
+"త్వరపడవద్దు"
+],
+"how_to_stay_safe": [
+"వాహనం ప్రత్యక్షంగా చూడండి",
+"RC చెక్ చేయండి",
+"నమ్మకమైన డీలర్ వద్ద కొనండి",
+"సురక్షిత చెల్లింపు వాడండి"
+],
+"if_affected": [
+"పోలీసులకు ఫిర్యాదు చేయండి",
+"బ్యాంక్‌కు చెప్పండి",
+"సైబర్ కంప్లైంట్ చేయండి",
+"సాక్ష్యాలు ఉంచండి"
+]
+}
+},
+{
+"title_en": "WhatsApp Job Scams",
+"title_hi": "व्हाट्सएप जॉब धोखाधड़ी",
+"title_te": "వాట్సాప్ ఉద్యోగ మోసాలు",
+"description_en": "Learn how fake job offers on WhatsApp trap people and how to stay safe.",
+"description_hi": "जानें व्हाट्सएप जॉब स्कैम से कैसे बचें।",
+"description_te": "వాట్సాప్ జాబ్ మోసాల నుండి ఎలా రక్షించుకోవాలో తెలుసుకోండి.",
+"category": "SOCIAL",
+"read_time": 3,
+"content_en": {
+"what_is": "WhatsApp job scams are fake job offers sent through messages that ask for money or personal details.",
+"how_it_works": [
+"You receive message about easy job",
+"Promises high salary for simple tasks",
+"Asks registration or training fee",
+"After payment, scammer blocks you"
+],
+"warning_signs": [
+"Job offer without applying",
+"High pay for simple work",
+"Payment required before joining",
+"Unknown recruiter"
+],
+"what_not_to_do": [
+"Do not pay for job offers",
+"Do not share documents",
+"Do not trust unknown messages",
+"Do not click suspicious links"
+],
+"how_to_stay_safe": [
+"Apply through official websites",
+"Verify company details",
+"Avoid WhatsApp-only jobs",
+"Check reviews online"
+],
+"if_affected": [
+"Report number on WhatsApp",
+"Inform bank",
+"File cyber complaint",
+"Warn others"
+]
+},
+"content_hi": {
+"what_is": "व्हाट्सएप पर नकली नौकरी ऑफर देकर ठग पैसे लेते हैं।",
+"how_it_works": [
+"जॉब मैसेज भेजते हैं",
+"आसान काम और ज्यादा सैलरी बताते हैं",
+"फीस मांगते हैं",
+"पैसे लेकर ब्लॉक कर देते हैं"
+],
+"warning_signs": [
+"बिना आवेदन नौकरी",
+"ज्यादा सैलरी",
+"पहले पैसे मांगना",
+"अज्ञात कंपनी"
+],
+"what_not_to_do": [
+"पैसे न दें",
+"डॉक्यूमेंट न दें",
+"अनजान मैसेज पर भरोसा न करें",
+"लिंक न खोलें"
+],
+"how_to_stay_safe": [
+"ऑफिशियल साइट से आवेदन करें",
+"कंपनी जांचें",
+"WhatsApp जॉब से बचें",
+"रिव्यू देखें"
+],
+"if_affected": [
+"WhatsApp पर रिपोर्ट करें",
+"बैंक को बताएं",
+"शिकायत करें",
+"दूसरों को बताएं"
+]
+},
+"content_te": {
+"what_is": "వాట్సాప్ ద్వారా నకిలీ ఉద్యోగ ఆఫర్లతో మోసం చేస్తారు.",
+"how_it_works": [
+"జాబ్ మెసేజ్ పంపిస్తారు",
+"సులభమైన పని, ఎక్కువ జీతం చెబుతారు",
+"ఫీజు అడుగుతారు",
+"డబ్బు తీసుకుని బ్లాక్ చేస్తారు"
+],
+"warning_signs": [
+"అప్లై చేయకుండా జాబ్ ఆఫర్",
+"ఎక్కువ జీతం",
+"ముందుగా డబ్బు అడగడం",
+"తెలియని కంపెనీ"
+],
+"what_not_to_do": [
+"డబ్బు ఇవ్వవద్దు",
+"డాక్యుమెంట్లు ఇవ్వవద్దు",
+"తెలియని మెసేజ్ నమ్మవద్దు",
+"లింక్ క్లిక్ చేయవద్దు"
+],
+"how_to_stay_safe": [
+"అధికారిక సైట్ ద్వారా అప్లై చేయండి",
+"కంపెనీ చెక్ చేయండి",
+"WhatsApp జాబ్‌లను నివారించండి",
+"రివ్యూలు చూడండి"
+],
+"if_affected": [
+"WhatsAppలో రిపోర్ట్ చేయండి",
+"బ్యాంక్‌కు చెప్పండి",
+"ఫిర్యాదు చేయండి",
+"ఇతరులకు చెప్పండి"
+]
+}
+}
+]
+
+
